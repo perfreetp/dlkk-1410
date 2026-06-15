@@ -1,0 +1,614 @@
+import { useState, useMemo } from "react";
+import {
+  ClipboardCheck,
+  Search,
+  Filter,
+  ChevronDown,
+  ChevronRight,
+  User,
+  FileText,
+  Pill,
+  AlarmClock,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertCircle,
+  Zap,
+  Clock4,
+  Stethoscope,
+  Building2,
+  Send,
+  RefreshCw,
+  Info,
+  X,
+} from "lucide-react";
+import type { ApprovalRequest, ApprovalStatus } from "@/types";
+import { APPROVAL_REQUESTS } from "@/data/approvals";
+import { cn, formatDateTime, formatDrugCategory, formatPriority, getDaysRemaining, formatTimeAgo } from "@/utils/format";
+import { DRUG_CATEGORY_LABELS, APPROVAL_STATUS_LABELS } from "@/utils/constants";
+import { getTitleName } from "@/data/users";
+
+const TABS: Array<{ key: "ALL" | ApprovalStatus; label: string; count?: number }> = [
+  { key: "ALL", label: "全部" },
+  { key: "PENDING", label: "待我审批" },
+  { key: "IN_PROGRESS", label: "审批中" },
+  { key: "APPROVED", label: "已通过" },
+  { key: "REJECTED", label: "已驳回" },
+];
+
+function StatusBadge({ s, urgent }: { s: ApprovalStatus; urgent?: boolean }) {
+  const cls =
+    s === "APPROVED"
+      ? "badge-success"
+      : s === "REJECTED"
+      ? "bg-red-50 text-red-700 ring-1 ring-inset ring-red-200 badge"
+      : s === "IN_PROGRESS"
+      ? "badge-info"
+      : "badge-warning";
+  return (
+    <span className="inline-flex items-center gap-1">
+      {urgent && <Zap className="w-3 h-3 text-red-500" />}
+      <span className={cls}>{APPROVAL_STATUS_LABELS[s]}</span>
+    </span>
+  );
+}
+
+function ApprovalTimeline({ req }: { req: ApprovalRequest }) {
+  const steps = [
+    { key: "FIRST", label: "科室主任初审" },
+    { key: "SECOND", label: "感染/药学复审" },
+    { key: "FINAL", label: "负责人终审" },
+  ];
+  return (
+    <div className="space-y-4">
+      {steps.map((s, i) => {
+        const step = req.steps.find((x) => x.stepType === s.key);
+        const done = step?.result === "APPROVED";
+        const rejected = step?.result === "REJECTED";
+        const active = req.currentStep > i || (req.currentStep === i && !step);
+        return (
+          <div key={s.key} className="timeline-step">
+            <div
+              className={cn(
+                "timeline-dot ring-4",
+                done
+                  ? "bg-emerald-500 ring-emerald-100 text-white"
+                  : rejected
+                  ? "bg-red-500 ring-red-100 text-white"
+                  : active
+                  ? "bg-amber-400 ring-amber-100 text-white animate-pulse"
+                  : "bg-slate-200 ring-slate-50 text-slate-400"
+              )}
+            >
+              {done ? (
+                <CheckCircle2 className="w-3 h-3" />
+              ) : rejected ? (
+                <XCircle className="w-3 h-3" />
+              ) : active ? (
+                <Clock className="w-3 h-3" />
+              ) : (
+                <span className="text-[10px] font-bold">{i + 1}</span>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-slate-800">{s.label}</div>
+                {step?.signedAt && (
+                  <div className="text-xs text-slate-400 font-mono tabular-nums">
+                    {formatDateTime(step.signedAt).slice(5)}
+                  </div>
+                )}
+              </div>
+              {step ? (
+                <div className="mt-1.5">
+                  <div className="text-xs text-slate-500 mb-1.5">
+                    {step.approverName} · {getTitleName(step.approverTitle)}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-sm leading-relaxed p-3 rounded-lg",
+                      rejected ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-600"
+                    )}
+                  >
+                    {step.opinion}
+                  </div>
+                </div>
+              ) : active ? (
+                <div className="mt-1 text-xs text-amber-700 inline-flex items-center gap-1 bg-amber-50 px-2 py-1 rounded-md">
+                  <Clock4 className="w-3 h-3" />
+                  正在等待处理
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-slate-400">尚未到达此节点</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DetailPanel({
+  req,
+  onClose,
+}: {
+  req: ApprovalRequest | null;
+  onClose: () => void;
+}) {
+  const [opinion, setOpinion] = useState("");
+  const [result, setResult] = useState<"APPROVED" | "REJECTED" | null>(null);
+
+  if (!req) return null;
+
+  const isMyTurn =
+    req.status === "PENDING" ||
+    (req.status === "IN_PROGRESS" && (req.currentStep === 1 || req.currentStep === 2));
+
+  const days = req.deadline ? getDaysRemaining(req.deadline) : null;
+  const overdue = days !== null && days < 0;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-700/20 backdrop-blur-sm z-40 animate-fade-in" onClick={onClose} />
+      <div className="fixed inset-4 left-auto w-[860px] max-w-[95vw] bg-white z-50 shadow-2xl rounded-2xl overflow-hidden animate-slide-in-right flex flex-col">
+        <header
+          className={cn(
+            "px-6 py-4 border-b border-border shrink-0",
+            req.isUrgent && "bg-gradient-to-r from-red-50 via-amber-50/40 to-transparent"
+          )}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <StatusBadge s={req.status} urgent={req.isUrgent} />
+                {req.drugCategory === "SPECIAL" && (
+                  <span className="badge-drug-special">特殊级药物</span>
+                )}
+                {req.drugCategory === "RESTRICTED" && (
+                  <span className="badge-drug-restricted">限制级药物</span>
+                )}
+                {req.isUrgent && (
+                  <span className="badge-severity-critical inline-flex items-center gap-1">
+                    <Zap className="w-3 h-3" />
+                    紧急绿色通道
+                  </span>
+                )}
+              </div>
+              <h2 className="font-display text-2xl text-navy-700 tracking-tight mt-2.5">
+                {req.patientName} · {req.drugName}
+              </h2>
+              <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                <span>
+                  <span className="inline-flex items-center gap-1">
+                    <ClipboardCheck className="w-3 h-3" />
+                    申请单号 {req.id.toUpperCase()}
+                  </span>
+                </span>
+                <span className="text-slate-300">·</span>
+                <span>
+                  {formatTimeAgo(req.createdAt)}申请 · {formatDateTime(req.createdAt)}
+                </span>
+                {req.deadline && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 font-medium",
+                        overdue
+                          ? "text-red-600"
+                          : days! <= 1
+                          ? "text-amber-600"
+                          : "text-slate-500"
+                      )}
+                    >
+                      <AlarmClock className="w-3 h-3" />
+                      {overdue ? `已逾期${-days!}小时` : `剩余${Math.ceil((days! * 24) % 24 || 24)}小时`}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+            <button className="btn-ghost p-2" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-[320px,1fr] gap-6 p-6">
+            <aside className="space-y-4">
+              <div className="card p-5 bg-gradient-to-br from-slate-50 to-teal-50/40 border-slate-200/60">
+                <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
+                  <User className="w-3.5 h-3.5" />
+                  患者信息
+                </div>
+                <div className="text-xl font-bold text-navy-700">{req.patientName}</div>
+                <div className="text-sm text-slate-600 mt-0.5">
+                  {req.patientGender === "M" ? "男" : "女"} · {req.patientAge}岁
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-200/60">
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">
+                    临床诊断
+                  </div>
+                  <div className="text-sm text-slate-700 leading-relaxed">
+                    {req.patientDiagnosis}
+                  </div>
+                </div>
+              </div>
+
+              <div className="card p-5">
+                <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
+                  <Building2 className="w-3.5 h-3.5" />
+                  申请方
+                </div>
+                <div className="text-sm font-medium text-slate-800">{req.applicantName}</div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {getTitleName(req.applicantTitle)} · {req.departmentName}
+                </div>
+              </div>
+
+              <div className="card p-5 border-l-4 border-l-amber-400">
+                <div className="flex items-center gap-2 text-xs text-slate-500 mb-3">
+                  <Pill className="w-3.5 h-3.5" />
+                  申请用药方案
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs text-slate-500">药品</span>
+                    <span className="text-sm font-semibold text-slate-800">
+                      {req.drugName}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs text-slate-500">规格</span>
+                    <span className="text-xs text-slate-600">{req.drugSpecification}</span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs text-slate-500">剂量</span>
+                    <span className="text-sm text-slate-700 font-mono">{req.proposedDosage}</span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs text-slate-500">疗程</span>
+                    <span className="text-sm text-slate-700">{req.proposedDuration} 天</span>
+                  </div>
+                </div>
+              </div>
+
+              {req.validHours && (
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200/60">
+                  <div className="flex items-center gap-2 text-emerald-700 font-semibold text-sm mb-1">
+                    <CheckCircle2 className="w-4 h-4" />
+                    已授权
+                  </div>
+                  <div className="text-xs text-emerald-600">
+                    授权时长 {req.validHours} 小时，到期自动收回权限
+                  </div>
+                </div>
+              )}
+            </aside>
+
+            <section className="space-y-6">
+              <div className="card p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Stethoscope className="w-4 h-4 text-teal-600" />
+                  <h3 className="font-display text-lg text-slate-800">申请理由</h3>
+                </div>
+                <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">
+                  {req.reason}
+                </p>
+              </div>
+
+              <div className="card p-5 bg-slate-50/40">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-navy-600" />
+                    <h3 className="font-display text-lg text-slate-800">审批流程</h3>
+                  </div>
+                  {isMyTurn && (
+                    <span className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded-md inline-flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      当前节点待您审批
+                    </span>
+                  )}
+                </div>
+                <ApprovalTimeline req={req} />
+              </div>
+
+              {isMyTurn && (
+                <div className="card p-5 border border-teal-200 bg-gradient-to-br from-teal-50/40 to-white">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Info className="w-4 h-4 text-teal-700" />
+                    <h3 className="font-display text-lg text-slate-800">填写审批意见</h3>
+                  </div>
+                  <textarea
+                    value={opinion}
+                    onChange={(e) => setOpinion(e.target.value)}
+                    className="form-textarea"
+                    placeholder="请填写详细的审批意见，包括用药建议、监测要求、授权时限等..."
+                  />
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500">推荐模板：</span>
+                      {["同意，授权72小时，需监测TDM", "建议降级用药，请补充培养结果", "请先完善PCT/病原学检测"].map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setOpinion(t)}
+                          className="filter-chip !text-[11px]"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setResult("REJECTED")}
+                        className={cn(
+                          "btn",
+                          result === "REJECTED"
+                            ? "bg-red-600 text-white hover:bg-red-700"
+                            : "btn-outline border-red-300 text-red-700 hover:bg-red-50"
+                        )}
+                      >
+                        <XCircle className="w-4 h-4" />
+                        驳回申请
+                      </button>
+                      <button
+                        onClick={() => setResult("APPROVED")}
+                        className={cn(
+                          "btn",
+                          result === "APPROVED"
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "btn-primary"
+                        )}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        通过审批
+                      </button>
+                    </div>
+                  </div>
+                  {result && opinion && (
+                    <div className="mt-4 p-3 rounded-lg bg-navy-50 border border-navy-100 flex items-center justify-between animate-fade-in">
+                      <div className="text-xs text-slate-600">
+                        <span className="font-semibold text-navy-700">
+                          {result === "APPROVED" ? "将通过此申请" : "将驳回此申请"}
+                        </span>
+                        ，并记录审批意见及电子签名
+                      </div>
+                      <button className="btn-sm btn-primary">
+                        <Send className="w-3.5 h-3.5" />
+                        确认提交
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function ApprovalPage() {
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("PENDING");
+  const [keyword, setKeyword] = useState("");
+  const [detail, setDetail] = useState<ApprovalRequest | null>(null);
+
+  const tabsWithCount = useMemo(
+    () =>
+      TABS.map((t) => ({
+        ...t,
+        count:
+          t.key === "ALL"
+            ? APPROVAL_REQUESTS.length
+            : APPROVAL_REQUESTS.filter((a) => a.status === t.key).length,
+      })),
+    []
+  );
+
+  const requests = useMemo(() => {
+    return APPROVAL_REQUESTS.filter((a) => {
+      if (tab !== "ALL" && a.status !== tab) return false;
+      if (keyword) {
+        const k = keyword.toLowerCase();
+        return (
+          a.patientName.toLowerCase().includes(k) ||
+          a.applicantName.toLowerCase().includes(k) ||
+          a.drugName.toLowerCase().includes(k) ||
+          a.departmentName.toLowerCase().includes(k)
+        );
+      }
+      return true;
+    }).sort((a, b) => {
+      if (a.isUrgent !== b.isUrgent) return a.isUrgent ? -1 : 1;
+      return -a.createdAt.localeCompare(b.createdAt);
+    });
+  }, [tab, keyword]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="tab-list">
+          {tabsWithCount.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn("tab-item inline-flex items-center gap-2", tab === t.key && "tab-item-active")}
+            >
+              {t.label}
+              <span
+                className={cn(
+                  "data-number text-[11px] px-1.5 py-0.5 rounded",
+                  tab === t.key
+                    ? t.key === "REJECTED"
+                      ? "bg-red-100 text-red-700"
+                      : t.key === "APPROVED"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-navy-500/10 text-navy-700"
+                    : "bg-white/60 text-slate-400"
+                )}
+              >
+                {t.count}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="搜索患者/医生/药品/科室..."
+              className="form-input w-72 pl-9"
+            />
+          </div>
+          <button className="btn-outline">
+            <Filter className="w-4 h-4" />
+            高级筛选
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="pl-5">优先级</th>
+                <th>患者</th>
+                <th>申请药品</th>
+                <th>诊断</th>
+                <th>申请人</th>
+                <th>审批进度</th>
+                <th>申请时间</th>
+                <th>状态</th>
+                <th className="pr-5 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((a, i) => {
+                const stepsDone = a.steps.filter((s) => s.result).length;
+                return (
+                  <tr
+                    key={a.id}
+                    onClick={() => setDetail(a)}
+                    className={cn(
+                      "cursor-pointer group",
+                      a.isUrgent && i < 3 && "bg-red-50/30 hover:bg-red-50/50!"
+                    )}
+                  >
+                    <td className="pl-5">
+                      {a.isUrgent ? (
+                        <span className="badge-severity-critical inline-flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          紧急
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">常规</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="text-sm font-medium text-slate-800 group-hover:text-navy-700">
+                        {a.patientName}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {a.patientGender === "M" ? "男" : "女"} · {a.patientAge}岁
+                      </div>
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={cn(
+                            "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                            a.drugCategory === "SPECIAL"
+                              ? "bg-red-100"
+                              : "bg-amber-100"
+                          )}
+                        >
+                          <Pill
+                            className={cn(
+                              "w-4 h-4",
+                              a.drugCategory === "SPECIAL" ? "text-red-600" : "text-amber-600"
+                            )}
+                          />
+                        </div>
+                        <div>
+                          <div className="text-sm text-slate-800 font-medium max-w-[160px] truncate">
+                            {a.drugName}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {formatDrugCategory(a.drugCategory)} · {a.proposedDuration}天
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="text-sm text-slate-700 max-w-[200px] line-clamp-1">
+                        {a.patientDiagnosis}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="text-sm text-slate-800">{a.applicantName}</div>
+                      <div className="text-[11px] text-slate-500">{a.departmentName}</div>
+                    </td>
+                    <td>
+                      <div className="w-24">
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+                          <span>进度</span>
+                          <span className="font-mono">{stepsDone}/3</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full transition-all duration-500",
+                              a.status === "REJECTED"
+                                ? "bg-red-500"
+                                : stepsDone === 3
+                                ? "bg-emerald-500"
+                                : "bg-gradient-to-r from-teal-400 to-teal-600"
+                            )}
+                            style={{ width: `${(stepsDone / 3) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="text-xs font-mono tabular-nums text-slate-700">
+                        {a.createdAt.slice(5, 16)}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {formatTimeAgo(a.createdAt)}
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge s={a.status} urgent={a.isUrgent} />
+                    </td>
+                    <td className="pr-5 text-right">
+                      <button className="btn-ghost btn-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                        审批
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {requests.length === 0 && (
+          <div className="py-24 text-center">
+            <div className="text-5xl mb-3">📋</div>
+            <div className="text-sm text-slate-500">暂无审批记录</div>
+          </div>
+        )}
+      </div>
+
+      <DetailPanel req={detail} onClose={() => setDetail(null)} />
+    </div>
+  );
+}
