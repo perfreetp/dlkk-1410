@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Search,
   Plus,
@@ -12,20 +12,14 @@ import {
   X,
   Edit3,
   Trash2,
-  MoreHorizontal,
   ChevronDown,
+  Check,
 } from "lucide-react";
+import { useDataStore } from "@/store/dataStore";
+import { useUserStore, useDashboardStore } from "@/store/appStore";
 import type { Drug, DrugCategory, Severity } from "@/types";
-import { DRUGS } from "@/data/drugs";
 import { cn, formatDateTime, formatSeverity, formatDrugCategory, formatNumber } from "@/utils/format";
 import { DRUG_CATEGORY_LABELS, SEVERITY_LABELS } from "@/utils/constants";
-
-const CATEGORIES: Array<{ key: "ALL" | DrugCategory; label: string; count: number }> = [
-  { key: "ALL", label: "全部", count: DRUGS.length },
-  { key: "NON_RESTRICTED", label: "非限制级", count: DRUGS.filter((d) => d.category === "NON_RESTRICTED").length },
-  { key: "RESTRICTED", label: "限制级", count: DRUGS.filter((d) => d.category === "RESTRICTED").length },
-  { key: "SPECIAL", label: "特殊级", count: DRUGS.filter((d) => d.category === "SPECIAL").length },
-];
 
 function CategoryBadge({ cat }: { cat: DrugCategory }) {
   const cls =
@@ -48,7 +42,7 @@ function SeverityDot({ s }: { s: Severity }) {
   );
 }
 
-function DrugDetailDrawer({ drug, onClose }: { drug: Drug | null; onClose: () => void }) {
+function DrugDetailDrawer({ drug, onClose, onEdit }: { drug: Drug | null; onClose: () => void; onEdit: (drug: Drug) => void }) {
   if (!drug) return null;
   return (
     <>
@@ -122,7 +116,7 @@ function DrugDetailDrawer({ drug, onClose }: { drug: Drug | null; onClose: () =>
                 <div className="text-sm font-medium text-slate-700 mt-0.5">{formatDateTime(drug.updatedAt)}</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="btn-outline btn-sm">
+                <button className="btn-outline btn-sm" onClick={() => onEdit(drug)}>
                   <Edit3 className="w-3.5 h-3.5" />
                   编辑
                 </button>
@@ -138,7 +132,366 @@ function DrugDetailDrawer({ drug, onClose }: { drug: Drug | null; onClose: () =>
   );
 }
 
+const EMPTY_FORM: Omit<Drug, "id" | "updatedAt"> = {
+  name: "",
+  genericName: "",
+  specification: "",
+  category: "NON_RESTRICTED",
+  manufacturer: "",
+  indication: "",
+  contraindication: "",
+  dosage: "",
+  warningLevel: "LOW",
+  dddValue: 0,
+  dddUnit: "mg",
+};
+
+function getFormDataFromDrug(drug: Drug): Omit<Drug, "id" | "updatedAt"> {
+  return {
+    name: drug.name,
+    genericName: drug.genericName,
+    specification: drug.specification,
+    category: drug.category,
+    manufacturer: drug.manufacturer,
+    indication: drug.indication,
+    contraindication: drug.contraindication,
+    dosage: drug.dosage,
+    warningLevel: drug.warningLevel,
+    dddValue: drug.dddValue,
+    dddUnit: drug.dddUnit,
+  };
+}
+
+function DrugFormModal({
+  open,
+  mode,
+  initialDrug,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  mode: "add" | "edit";
+  initialDrug: Drug | null;
+  onClose: () => void;
+  onSave: (data: Omit<Drug, "id" | "updatedAt">) => void;
+}) {
+  const [formData, setFormData] = useState<Omit<Drug, "id" | "updatedAt">>(EMPTY_FORM);
+
+  useEffect(() => {
+    if (open) {
+      if (mode === "edit" && initialDrug) {
+        setFormData(getFormDataFromDrug(initialDrug));
+      } else {
+        setFormData(EMPTY_FORM);
+      }
+    }
+  }, [open, mode, initialDrug]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-700/20 backdrop-blur-sm z-40 animate-fade-in" onClick={onClose} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[640px] max-h-[90vh] bg-white z-50 shadow-2xl rounded-2xl overflow-hidden animate-zoom-in">
+        <div className="sticky top-0 z-10 bg-white border-b border-border px-6 py-4 flex items-start justify-between">
+          <div>
+            <h2 className="font-display text-xl text-navy-700">
+              {mode === "add" ? "新增药品" : "编辑药品"}
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              {mode === "add" ? "请填写药品基本信息" : "修改药品信息，点击保存生效"}
+            </p>
+          </div>
+          <button className="btn-ghost p-2" onClick={onClose}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">药品名称 *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="如：阿莫西林胶囊"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">通用名 *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.genericName}
+                  onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
+                  placeholder="如：阿莫西林"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">规格 *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.specification}
+                  onChange={(e) => setFormData({ ...formData, specification: e.target.value })}
+                  placeholder="如：0.5g×24粒"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">生产厂家 *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.manufacturer}
+                  onChange={(e) => setFormData({ ...formData, manufacturer: e.target.value })}
+                  placeholder="如：华北制药股份有限公司"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">药品分级 *</label>
+                <select
+                  className="form-input"
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value as DrugCategory })}
+                >
+                  {(Object.keys(DRUG_CATEGORY_LABELS) as DrugCategory[]).map((c) => (
+                    <option key={c} value={c}>{DRUG_CATEGORY_LABELS[c]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">警示等级 *</label>
+                <select
+                  className="form-input"
+                  value={formData.warningLevel}
+                  onChange={(e) => setFormData({ ...formData, warningLevel: e.target.value as Severity })}
+                >
+                  {(Object.keys(SEVERITY_LABELS) as Severity[]).map((s) => (
+                    <option key={s} value={s}>{SEVERITY_LABELS[s]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">DDD 值 *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  value={formData.dddValue}
+                  onChange={(e) => setFormData({ ...formData, dddValue: parseFloat(e.target.value) || 0 })}
+                  placeholder="如：1.0"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">DDD 单位 *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.dddUnit}
+                  onChange={(e) => setFormData({ ...formData, dddUnit: e.target.value })}
+                  placeholder="如：mg、g"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">适应症 *</label>
+              <textarea
+                className="form-input min-h-[80px]"
+                value={formData.indication}
+                onChange={(e) => setFormData({ ...formData, indication: e.target.value })}
+                placeholder="请输入适应症说明"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">禁忌症 *</label>
+              <textarea
+                className="form-input min-h-[80px]"
+                value={formData.contraindication}
+                onChange={(e) => setFormData({ ...formData, contraindication: e.target.value })}
+                placeholder="请输入禁忌症说明"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">用法用量 *</label>
+              <textarea
+                className="form-input min-h-[80px]"
+                value={formData.dosage}
+                onChange={(e) => setFormData({ ...formData, dosage: e.target.value })}
+                placeholder="请输入用法用量说明"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-border px-6 py-4 flex items-center justify-end gap-3">
+          <button className="btn-outline" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              onSave(formData);
+            }}
+          >
+            <Check className="w-4 h-4" />
+            保存
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ConfirmModal({
+  open,
+  title,
+  description,
+  confirmText,
+  cancelText,
+  onConfirm,
+  onCancel,
+  danger,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmText?: string;
+  cancelText?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  danger?: boolean;
+}) {
+  if (!open) return null;
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-700/20 backdrop-blur-sm z-40 animate-fade-in" onClick={onCancel} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[440px] bg-white z-50 shadow-2xl rounded-2xl overflow-hidden animate-zoom-in">
+        <div className="p-6">
+          <h3 className="font-display text-lg text-navy-700 mb-2">{title}</h3>
+          <p className="text-sm text-slate-600">{description}</p>
+        </div>
+        <div className="bg-slate-50 px-6 py-4 flex items-center justify-end gap-3">
+          <button className="btn-outline btn-sm" onClick={onCancel}>
+            {cancelText || "取消"}
+          </button>
+          <button
+            className={cn("btn-sm", danger ? "btn-danger" : "btn-primary")}
+            onClick={onConfirm}
+          >
+            {confirmText || "确认"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BatchUpdateModal({
+  open,
+  count,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  count: number;
+  onClose: () => void;
+  onConfirm: (changes: Partial<Drug>) => void;
+}) {
+  const [category, setCategory] = useState<DrugCategory | "">("");
+  const [warningLevel, setWarningLevel] = useState<Severity | "">("");
+
+  if (!open) return null;
+
+  const handleConfirm = () => {
+    const changes: Partial<Drug> = {};
+    if (category) changes.category = category as DrugCategory;
+    if (warningLevel) changes.warningLevel = warningLevel as Severity;
+    if (Object.keys(changes).length > 0) {
+      onConfirm(changes);
+    }
+    setCategory("");
+    setWarningLevel("");
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-700/20 backdrop-blur-sm z-40 animate-fade-in" onClick={onClose} />
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[480px] bg-white z-50 shadow-2xl rounded-2xl overflow-hidden animate-zoom-in">
+        <div className="sticky top-0 z-10 bg-white border-b border-border px-6 py-4 flex items-start justify-between">
+          <div>
+            <h2 className="font-display text-xl text-navy-700">批量调整分级</h2>
+            <p className="text-sm text-slate-500 mt-1">已选择 {count} 个药品，选择要调整的字段</p>
+          </div>
+          <button className="btn-ghost p-2" onClick={onClose}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">药品分级</label>
+            <select
+              className="form-input"
+              value={category}
+              onChange={(e) => setCategory(e.target.value as DrugCategory | "")}
+            >
+              <option value="">不修改</option>
+              {(Object.keys(DRUG_CATEGORY_LABELS) as DrugCategory[]).map((c) => (
+                <option key={c} value={c}>{DRUG_CATEGORY_LABELS[c]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">警示等级</label>
+            <select
+              className="form-input"
+              value={warningLevel}
+              onChange={(e) => setWarningLevel(e.target.value as Severity | "")}
+            >
+              <option value="">不修改</option>
+              {(Object.keys(SEVERITY_LABELS) as Severity[]).map((s) => (
+                <option key={s} value={s}>{SEVERITY_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 px-6 py-4 flex items-center justify-end gap-3">
+          <button className="btn-outline btn-sm" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="btn-primary btn-sm"
+            onClick={handleConfirm}
+            disabled={!category && !warningLevel}
+          >
+            确认调整
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function CatalogPage() {
+  const drugs = useDataStore((s) => s.drugs);
+  const { addDrug, updateDrug, deleteDrug, batchUpdateDrugs, resetDrugs, getDrugCounts } = useDataStore();
+
   const [activeCat, setActiveCat] = useState<"ALL" | DrugCategory>("ALL");
   const [keyword, setKeyword] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -146,8 +499,31 @@ export default function CatalogPage() {
   const [showSeverityFilter, setShowSeverityFilter] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<Severity[]>([]);
 
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"add" | "edit">("add");
+  const [editingDrug, setEditingDrug] = useState<Drug | null>(null);
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletingDrugId, setDeletingDrugId] = useState<string | null>(null);
+  const [batchDeleteMode, setBatchDeleteMode] = useState(false);
+
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+
+  const drugCounts = useMemo(() => getDrugCounts(), [getDrugCounts]);
+
+  const CATEGORIES = useMemo(
+    () => [
+      { key: "ALL" as const, label: "全部", count: drugCounts.ALL },
+      { key: "NON_RESTRICTED" as const, label: "非限制级", count: drugCounts.NON_RESTRICTED },
+      { key: "RESTRICTED" as const, label: "限制级", count: drugCounts.RESTRICTED },
+      { key: "SPECIAL" as const, label: "特殊级", count: drugCounts.SPECIAL },
+    ],
+    [drugCounts]
+  );
+
   const filtered = useMemo(() => {
-    return DRUGS.filter((d) => {
+    return drugs.filter((d) => {
       if (activeCat !== "ALL" && d.category !== activeCat) return false;
       if (severityFilter.length && !severityFilter.includes(d.warningLevel)) return false;
       if (keyword) {
@@ -162,17 +538,96 @@ export default function CatalogPage() {
       }
       return true;
     });
-  }, [activeCat, keyword, severityFilter]);
+  }, [drugs, activeCat, keyword, severityFilter]);
+
+  const currentDetailDrug = useMemo(() => {
+    if (!detailDrug) return null;
+    return drugs.find((d) => d.id === detailDrug.id) || detailDrug;
+  }, [detailDrug, drugs]);
 
   const toggleSelect = (id: string) => {
     setSelected((s) => {
       const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
       return n;
     });
   };
 
   const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
+
+  const refreshStores = () => {
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+  };
+
+  const handleAddDrug = () => {
+    setModalMode("add");
+    setEditingDrug(null);
+    setModalOpen(true);
+  };
+
+  const handleEditDrug = (drug: Drug) => {
+    setModalMode("edit");
+    setEditingDrug(drug);
+    setModalOpen(true);
+    if (detailDrug?.id === drug.id) {
+      setDetailDrug(null);
+    }
+  };
+
+  const handleSaveDrug = (data: Omit<Drug, "id" | "updatedAt">) => {
+    if (modalMode === "add") {
+      addDrug(data);
+    } else if (modalMode === "edit" && editingDrug) {
+      updateDrug(editingDrug.id, data);
+    }
+    refreshStores();
+    setModalOpen(false);
+    setEditingDrug(null);
+  };
+
+  const handleDeleteClick = (id: string) => {
+    setDeletingDrugId(id);
+    setBatchDeleteMode(false);
+    setDeleteModalOpen(true);
+  };
+
+  const handleBatchDeleteClick = () => {
+    setBatchDeleteMode(true);
+    setDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (batchDeleteMode) {
+      selected.forEach((id) => deleteDrug(id));
+      setSelected(new Set());
+    } else if (deletingDrugId) {
+      deleteDrug(deletingDrugId);
+      if (detailDrug?.id === deletingDrugId) {
+        setDetailDrug(null);
+      }
+    }
+    refreshStores();
+    setDeleteModalOpen(false);
+    setDeletingDrugId(null);
+  };
+
+  const handleBatchUpdate = (changes: Partial<Drug>) => {
+    batchUpdateDrugs(Array.from(selected), changes);
+    refreshStores();
+    setBatchModalOpen(false);
+  };
+
+  const handleReset = () => {
+    resetDrugs();
+    refreshStores();
+    setResetModalOpen(false);
+    setSelected(new Set());
+  };
 
   return (
     <div className="space-y-5">
@@ -245,7 +700,10 @@ export default function CatalogPage() {
             <Download className="w-4 h-4" />
             导出
           </button>
-          <button className="btn-primary">
+          <button className="btn-outline" onClick={() => setResetModalOpen(true)}>
+            重置
+          </button>
+          <button className="btn-primary" onClick={handleAddDrug}>
             <Plus className="w-4 h-4" />
             新增药品
           </button>
@@ -258,9 +716,9 @@ export default function CatalogPage() {
             已选择 <span className="data-number font-bold text-navy-700">{selected.size}</span> 个药品
           </div>
           <div className="flex items-center gap-2">
-            <button className="btn-outline btn-sm">批量调整分级</button>
+            <button className="btn-outline btn-sm" onClick={() => setBatchModalOpen(true)}>批量调整分级</button>
             <button className="btn-outline btn-sm">批量设置警示规则</button>
-            <button className="btn-danger btn-sm">删除</button>
+            <button className="btn-danger btn-sm" onClick={handleBatchDeleteClick}>删除</button>
             <button
               className="btn-ghost btn-sm"
               onClick={() => setSelected(new Set())}
@@ -341,10 +799,10 @@ export default function CatalogPage() {
                   <td className="text-xs text-slate-500">{formatDateTime(d.updatedAt)}</td>
                   <td className="pr-5 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="inline-flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-teal-600">
+                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-teal-600" onClick={() => handleEditDrug(d)}>
                         <Edit3 className="w-4 h-4" />
                       </button>
-                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-red-600">
+                      <button className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-red-600" onClick={() => handleDeleteClick(d.id)}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                       <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all" />
@@ -378,7 +836,52 @@ export default function CatalogPage() {
         </div>
       </div>
 
-      <DrugDetailDrawer drug={detailDrug} onClose={() => setDetailDrug(null)} />
+      <DrugDetailDrawer drug={currentDetailDrug} onClose={() => setDetailDrug(null)} onEdit={handleEditDrug} />
+
+      <DrugFormModal
+        open={modalOpen}
+        mode={modalMode}
+        initialDrug={editingDrug}
+        onClose={() => {
+          setModalOpen(false);
+          setEditingDrug(null);
+        }}
+        onSave={handleSaveDrug}
+      />
+
+      <ConfirmModal
+        open={deleteModalOpen}
+        title={batchDeleteMode ? "确认批量删除" : "确认删除"}
+        description={
+          batchDeleteMode
+            ? `确定要删除选中的 ${selected.size} 个药品吗？此操作不可恢复。`
+            : "确定要删除该药品吗？此操作不可恢复。"
+        }
+        confirmText="删除"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          setDeleteModalOpen(false);
+          setDeletingDrugId(null);
+        }}
+        danger
+      />
+
+      <BatchUpdateModal
+        open={batchModalOpen}
+        count={selected.size}
+        onClose={() => setBatchModalOpen(false)}
+        onConfirm={handleBatchUpdate}
+      />
+
+      <ConfirmModal
+        open={resetModalOpen}
+        title="确认重置"
+        description="确定要将药品数据重置为初始状态吗？所有修改将丢失。"
+        confirmText="重置"
+        onConfirm={handleReset}
+        onCancel={() => setResetModalOpen(false)}
+        danger
+      />
     </div>
   );
 }

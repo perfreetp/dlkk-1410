@@ -29,12 +29,15 @@ import {
   Bookmark,
   ArrowRight,
 } from "lucide-react";
-import type { RectificationTask, RectificationStatus, WarningType } from "@/types";
-import { RECTIFICATION_TASKS, INTERVENTION_TEMPLATES, getRectificationStats } from "@/data/analytics";
-import { DEPARTMENTS } from "@/data/users";
-import { cn, formatDate, formatDateTime, formatPriority, formatWarningType, getDaysRemaining, isOverdue, formatNumber, formatPercent } from "@/utils/format";
+import type { RectificationTask, RectificationStatus, WarningType, Priority } from "@/types";
+import { INTERVENTION_TEMPLATES } from "@/data/analytics";
+import { DEPARTMENTS, ALL_DOCTORS } from "@/data/users";
+import { cn, formatDate, formatDateTime, formatPriority, formatWarningType, getDaysRemaining, isOverdue, formatPercent } from "@/utils/format";
 import { WARNING_TYPE_LABELS, RECTIFICATION_STATUS_LABELS } from "@/utils/constants";
 import { getTitleName } from "@/data/users";
+import { useDataStore } from "@/store/dataStore";
+import { useUserStore, useDashboardStore } from "@/store/appStore";
+import dayjs from "dayjs";
 
 const STATUSES: Array<{ key: RectificationStatus; label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = [
   { key: "PENDING", label: "待处理", color: "bg-slate-500", icon: Clock4 },
@@ -349,14 +352,18 @@ function TemplateLibrary() {
   );
 }
 
+function getRectificationStats(tasks: RectificationTask[]) {
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === "DONE").length;
+  const overdue = tasks.filter((t) =>
+    t.status !== "DONE" && dayjs().isAfter(dayjs(t.deadline), "day")
+  ).length;
+  return { total, done, inProgress: total - done, overdue, completionRate: +(done / total).toFixed(3) };
+}
+
 function StatsPanel() {
-  const stats = getRectificationStats();
-  const byDept = DEPARTMENTS.slice(0, 6).map((d, i) => ({
-    name: d.shortName,
-    完成数: 3 + ((i * 3) % 8),
-    进行中: 1 + (i % 4),
-    逾期: i % 3 === 0 ? 1 : 0,
-  }));
+  const tasks = useDataStore((s) => s.tasks);
+  const stats = useMemo(() => getRectificationStats(tasks), [tasks]);
 
   return (
     <div className="grid grid-cols-4 gap-4 mb-5">
@@ -430,12 +437,25 @@ function TaskDetailDrawer({
   onClose: () => void;
 }) {
   const [reviewOpinion, setReviewOpinion] = useState("");
+  const reviewTask = useDataStore((s) => s.reviewTask);
+
   if (!task) return null;
 
   const overdue = isOverdue(task.deadline) && task.status !== "DONE";
   const days = getDaysRemaining(task.deadline);
   const tpl = task.templateId ? INTERVENTION_TEMPLATES.find((t) => t.id === task.templateId) : null;
   const CatIcon = CATEGORY_ICONS[task.category] || Bookmark;
+
+  const handleReview = (result: "APPROVED" | "REJECTED") => {
+    if (!reviewOpinion.trim()) {
+      alert("请填写审核意见");
+      return;
+    }
+    reviewTask(task.id, result, reviewOpinion);
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+    onClose();
+  };
 
   return (
     <>
@@ -632,11 +652,11 @@ function TaskDetailDrawer({
                 placeholder="请填写审核意见，如整改是否到位、数据是否真实、是否同意结案..."
               />
               <div className="mt-4 flex items-center justify-end gap-2">
-                <button className="btn btn-danger">
+                <button className="btn btn-danger" onClick={() => handleReview("REJECTED")}>
                   <XCircle className="w-4 h-4" />
                   退回修改
                 </button>
-                <button className="btn btn-success">
+                <button className="btn btn-success" onClick={() => handleReview("APPROVED")}>
                   <CheckCircle2 className="w-4 h-4" />
                   审核通过，结案归档
                 </button>
@@ -658,20 +678,36 @@ export default function RectificationPage() {
   const [openTask, setOpenTask] = useState<RectificationTask | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
 
-  const stats = useMemo(() => getRectificationStats(), []);
+  const [newDept, setNewDept] = useState(DEPARTMENTS[0].id);
+  const [newAssignee, setNewAssignee] = useState("");
+  const [newType, setNewType] = useState<WarningType | "GENERAL">("OVER_GRADE");
+  const [newPriority, setNewPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("HIGH");
+  const [newDeadline, setNewDeadline] = useState(dayjs().add(7, "day").format("YYYY-MM-DD"));
+  const [newTemplate, setNewTemplate] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+
+  const tasks = useDataStore((s) => s.tasks);
+  const addTask = useDataStore((s) => s.addTask);
+
+  const availableDoctors = useMemo(() => {
+    return ALL_DOCTORS.filter((d) => d.departmentId === newDept);
+  }, [newDept]);
+
+  const stats = useMemo(() => getRectificationStats(tasks), [tasks]);
   const byStatusCount = useMemo(() => {
     const r: Record<string, number> = {};
-    RECTIFICATION_TASKS.forEach((t) => (r[t.status] = (r[t.status] || 0) + 1));
+    tasks.forEach((t) => (r[t.status] = (r[t.status] || 0) + 1));
     return r;
-  }, []);
+  }, [tasks]);
 
   const tabs = [
-    { key: "ALL" as const, label: "全部", count: RECTIFICATION_TASKS.length },
+    { key: "ALL" as const, label: "全部", count: tasks.length },
     ...STATUSES.map((s) => ({ key: s.key, label: s.label, count: byStatusCount[s.key] || 0 })),
   ];
 
   const filtered = useMemo(() => {
-    return RECTIFICATION_TASKS.filter((t) => {
+    return tasks.filter((t) => {
       if (tab !== "ALL" && t.status !== tab) return false;
       if (dept !== "ALL" && t.departmentName !== DEPARTMENTS.find((d) => d.id === dept)?.name)
         return false;
@@ -691,7 +727,58 @@ export default function RectificationPage() {
       if (pr[a.priority] !== pr[b.priority]) return pr[a.priority] - pr[b.priority];
       return a.deadline.localeCompare(b.deadline);
     });
-  }, [tab, dept, category, keyword]);
+  }, [tasks, tab, dept, category, keyword]);
+
+  const handleSubmitNewTask = () => {
+    if (!newTitle.trim()) {
+      alert("请填写整改任务标题");
+      return;
+    }
+    if (!newDescription.trim()) {
+      alert("请填写详细整改要求");
+      return;
+    }
+    if (!newAssignee) {
+      alert("请选择责任人");
+      return;
+    }
+
+    const deptObj = DEPARTMENTS.find((d) => d.id === newDept);
+    const doctor = ALL_DOCTORS.find((d) => d.name === newAssignee);
+    addTask({
+      title: newTitle,
+      description: newDescription,
+      category: newType,
+      priority: newPriority,
+      deadline: newDeadline,
+      assigneeName: newAssignee,
+      assigneeTitle: doctor?.title || "ATTENDING",
+      departmentName: deptObj?.name || newDept,
+      templateId: newTemplate || undefined,
+    });
+
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+
+    setShowNewModal(false);
+    setNewTitle("");
+    setNewDescription("");
+    setNewTemplate("");
+  };
+
+  const handleTemplateSelect = (tplId: string) => {
+    setNewTemplate(tplId);
+    const tpl = INTERVENTION_TEMPLATES.find((t) => t.id === tplId);
+    if (tpl) {
+      setNewType(tpl.category);
+      if (!newTitle.trim()) {
+        setNewTitle(tpl.title);
+      }
+      if (!newDescription.trim()) {
+        setNewDescription(`${tpl.standardText}\n\n整改建议：${tpl.suggestion}`);
+      }
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -812,58 +899,96 @@ export default function RectificationPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="form-label">所属科室</label>
-                    <select className="form-select">
+                    <select
+                      className="form-select"
+                      value={newDept}
+                      onChange={(e) => {
+                        setNewDept(e.target.value);
+                        setNewAssignee("");
+                      }}
+                    >
                       {DEPARTMENTS.map((d) => (
-                        <option key={d.id}>{d.name}</option>
+                        <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
                   </div>
                   <div>
                     <label className="form-label">责任人</label>
-                    <select className="form-select">
-                      <option>请先选择科室...</option>
+                    <select
+                      className="form-select"
+                      value={newAssignee}
+                      onChange={(e) => setNewAssignee(e.target.value)}
+                    >
+                      <option value="">请选择责任人...</option>
+                      {availableDoctors.map((d) => (
+                        <option key={d.id} value={d.name}>{d.name} · {getTitleName(d.title)}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
                     <label className="form-label">整改类型</label>
-                    <select className="form-select">
+                    <select
+                      className="form-select"
+                      value={newType}
+                      onChange={(e) => setNewType(e.target.value as WarningType | "GENERAL")}
+                    >
                       {(Object.keys(WARNING_TYPE_LABELS) as WarningType[]).map((w) => (
-                        <option key={w}>{WARNING_TYPE_LABELS[w]}</option>
+                        <option key={w} value={w}>{WARNING_TYPE_LABELS[w]}</option>
                       ))}
-                      <option>综合整改</option>
+                      <option value="GENERAL">综合整改</option>
                     </select>
                   </div>
                   <div>
                     <label className="form-label">优先级</label>
-                    <select className="form-select">
-                      <option>高</option>
-                      <option>中</option>
-                      <option>低</option>
+                    <select
+                      className="form-select"
+                      value={newPriority}
+                      onChange={(e) => setNewPriority(e.target.value as "LOW" | "MEDIUM" | "HIGH")}
+                    >
+                      <option value="HIGH">高</option>
+                      <option value="MEDIUM">中</option>
+                      <option value="LOW">低</option>
                     </select>
                   </div>
                   <div>
                     <label className="form-label">截止日期</label>
-                    <input type="date" className="form-input" />
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={newDeadline}
+                      onChange={(e) => setNewDeadline(e.target.value)}
+                    />
                   </div>
                   <div>
                     <label className="form-label">套用干预模板</label>
-                    <select className="form-select">
+                    <select
+                      className="form-select"
+                      value={newTemplate}
+                      onChange={(e) => handleTemplateSelect(e.target.value)}
+                    >
                       <option value="">不使用模板</option>
                       {INTERVENTION_TEMPLATES.map((t) => (
-                        <option key={t.id}>{t.title}</option>
+                        <option key={t.id} value={t.id}>{t.title}</option>
                       ))}
                     </select>
                   </div>
                 </div>
                 <div>
                   <label className="form-label">整改任务标题</label>
-                  <input className="form-input" placeholder="简明扼要描述整改问题..." />
+                  <input
+                    className="form-input"
+                    placeholder="简明扼要描述整改问题..."
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                  />
                 </div>
                 <div>
                   <label className="form-label">详细整改要求</label>
                   <textarea
                     className="form-textarea min-h-[140px]"
                     placeholder="请描述具体问题、整改要求、数据指标等..."
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
                   />
                 </div>
               </div>
@@ -873,9 +998,7 @@ export default function RectificationPage() {
                 </button>
                 <button
                   className="btn-primary"
-                  onClick={() => {
-                    setShowNewModal(false);
-                  }}
+                  onClick={handleSubmitNewTask}
                 >
                   <Send className="w-4 h-4" />
                   下发整改通知

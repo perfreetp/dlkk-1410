@@ -1,9 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { ShieldCheck, Users, Building2, Search, ChevronDown, Info, RefreshCw, Check, AlertCircle, History } from "lucide-react";
-import { DEPARTMENTS, PERMISSION_MATRIX, ALL_DOCTORS, getTitleName } from "@/data/users";
+import { DEPARTMENTS, ALL_DOCTORS, getTitleName } from "@/data/users";
 import type { DrugCategory, DoctorTitle, PermissionConfig } from "@/types";
 import { cn, formatDateTime } from "@/utils/format";
 import { DRUG_CATEGORY_LABELS, DOCTOR_TITLE_LABELS } from "@/utils/constants";
+import { useDataStore } from "@/store/dataStore";
+import { useUserStore, useDashboardStore } from "@/store/appStore";
 
 const TITLES: DoctorTitle[] = ["PROFESSOR", "ASSOCIATE_PROFESSOR", "ATTENDING", "RESIDENT"];
 const CATEGORIES: DrugCategory[] = ["NON_RESTRICTED", "RESTRICTED", "SPECIAL"];
@@ -73,8 +75,15 @@ function PermissionCell({
 }
 
 function MatrixMode() {
-  const [configs, setConfigs] = useState<PermissionConfig[]>(PERMISSION_MATRIX);
+  const storePermissions = useDataStore((s) => s.permissions);
+  const savePermissions = useDataStore((s) => s.savePermissions);
+  const resetPermissions = useDataStore((s) => s.resetPermissions);
+  const [configs, setConfigs] = useState<PermissionConfig[]>(storePermissions);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setConfigs(storePermissions);
+  }, [storePermissions]);
 
   const visibleDepts = useMemo(
     () => DEPARTMENTS.filter((d) => !search || d.name.includes(search) || d.shortName.includes(search)),
@@ -87,6 +96,19 @@ function MatrixMode() {
         c.departmentId === deptId && c.title === title ? { ...c, allowedCategory: allowed, modifiedAt: formatDateTime(new Date()), modifiedBy: "王建国" } : c
       )
     );
+  };
+
+  const handleSave = () => {
+    savePermissions(configs);
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+  };
+
+  const handleReset = () => {
+    resetPermissions();
+    setConfigs(useDataStore.getState().permissions);
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
   };
 
   return (
@@ -108,11 +130,11 @@ function MatrixMode() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn-outline">
+          <button className="btn-outline" onClick={handleReset}>
             <RefreshCw className="w-4 h-4" />
             重置为默认
           </button>
-          <button className="btn-primary">保存权限配置</button>
+          <button className="btn-primary" onClick={handleSave}>保存权限配置</button>
         </div>
       </div>
 
@@ -225,6 +247,7 @@ function MatrixMode() {
 }
 
 function StaffMode() {
+  const permissions = useDataStore((s) => s.permissions);
   const [dept, setDept] = useState<string>(DEPARTMENTS[0].id);
   const doctors = ALL_DOCTORS.filter((d) => d.departmentId === dept);
 
@@ -258,10 +281,13 @@ function StaffMode() {
 
       <div className="grid grid-cols-3 gap-4">
         {doctors.map((d, i) => {
+          const cfg = permissions.find(
+            (p) => p.departmentId === d.departmentId && p.title === d.title
+          );
           const titles: Record<DrugCategory, boolean> = {
-            NON_RESTRICTED: true,
-            RESTRICTED: d.title !== "RESIDENT",
-            SPECIAL: d.title === "PROFESSOR" || (d.title === "ASSOCIATE_PROFESSOR" && ["d01", "d02", "d05", "d08"].includes(dept)),
+            NON_RESTRICTED: cfg?.allowedCategory.includes("NON_RESTRICTED") ?? true,
+            RESTRICTED: cfg?.allowedCategory.includes("RESTRICTED") ?? false,
+            SPECIAL: cfg?.allowedCategory.includes("SPECIAL") ?? false,
           };
           return (
             <div
@@ -301,8 +327,8 @@ function StaffMode() {
               </div>
 
               <div className="mt-4 pt-4 border-t border-border flex items-center justify-between text-xs">
-                <span className="text-slate-400">最近变更：2026-05-20</span>
-                <span className="text-teal-600 font-medium">王建国</span>
+                <span className="text-slate-400">最近变更：{cfg?.modifiedAt.slice(0, 10) || "2026-05-20"}</span>
+                <span className="text-teal-600 font-medium">{cfg?.modifiedBy || "王建国"}</span>
               </div>
             </div>
           );

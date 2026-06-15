@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { PrescriptionWarning, WarningType, Severity } from "@/types";
-import { PRESCRIPTION_WARNINGS } from "@/data/prescriptions";
+import { useDataStore } from "./dataStore";
 
 interface Filters {
   keyword: string;
@@ -12,7 +12,6 @@ interface Filters {
 }
 
 interface PresStore {
-  warnings: PrescriptionWarning[];
   filters: Filters;
   selectedId: string | null;
   setFilters: (f: Partial<Filters>) => void;
@@ -23,6 +22,7 @@ interface PresStore {
     action: "HANDLED" | "DISMISSED",
     opinion: string
   ) => void;
+  getWarnings: () => PrescriptionWarning[];
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -35,30 +35,20 @@ const DEFAULT_FILTERS: Filters = {
 };
 
 export const usePresStore = create<PresStore>((set, get) => ({
-  warnings: PRESCRIPTION_WARNINGS,
   filters: DEFAULT_FILTERS,
   selectedId: null,
   setFilters: (f) => set((s) => ({ filters: { ...s.filters, ...f } })),
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
   selectWarning: (id) => set({ selectedId: id }),
-  handleWarning: (id, action, opinion) =>
-    set((s) => ({
-      warnings: s.warnings.map((w) =>
-        w.id === id
-          ? {
-              ...w,
-              status: action,
-              handler: "李淑芬",
-              handledAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-              handleOpinion: opinion,
-            }
-          : w
-      ),
-    })),
+  handleWarning: (id, action, opinion) => {
+    useDataStore.getState().handleWarning(id, action, opinion);
+  },
+  getWarnings: () => useDataStore.getState().warnings,
 }));
 
 export function getFilteredWarnings(state: PresStore) {
-  const { warnings, filters } = state;
+  const { filters } = state;
+  const warnings = useDataStore.getState().warnings;
   return warnings.filter((w) => {
     if (filters.keyword) {
       const k = filters.keyword.toLowerCase();

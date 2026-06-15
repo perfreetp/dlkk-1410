@@ -1,8 +1,7 @@
 import { create } from "zustand";
 import type { TodoItem, User } from "@/types";
 import { CURRENT_USER } from "@/data/users";
-import { PRESCRIPTION_WARNINGS, getPendingWarnings } from "@/data/prescriptions";
-import { APPROVAL_REQUESTS, getPendingApprovals } from "@/data/approvals";
+import { useDataStore } from "./dataStore";
 import { RECTIFICATION_TASKS } from "@/data/analytics";
 
 interface UserState {
@@ -14,7 +13,9 @@ interface UserState {
 export const useUserStore = create<UserState>((set) => {
   const makeTodos = (): TodoItem[] => {
     const items: TodoItem[] = [];
-    getPendingApprovals().slice(0, 5).forEach((a) => {
+    const store = useDataStore.getState();
+
+    store.getPendingApprovals().slice(0, 5).forEach((a) => {
       items.push({
         id: `todo-app-${a.id}`,
         type: "APPROVAL",
@@ -26,7 +27,8 @@ export const useUserStore = create<UserState>((set) => {
         link: "/approval",
       });
     });
-    getPendingWarnings().slice(0, 6).forEach((w) => {
+
+    store.getPendingWarnings().slice(0, 6).forEach((w) => {
       items.push({
         id: `todo-warn-${w.id}`,
         type: "WARNING",
@@ -37,7 +39,8 @@ export const useUserStore = create<UserState>((set) => {
         link: "/monitoring",
       });
     });
-    RECTIFICATION_TASKS.filter((t) => t.status === "REVIEWING").slice(0, 4).forEach((t) => {
+
+    store.getPendingTasks().slice(0, 4).forEach((t) => {
       items.push({
         id: `todo-rect-${t.id}`,
         type: "RECTIFICATION",
@@ -49,6 +52,7 @@ export const useUserStore = create<UserState>((set) => {
         link: "/rectification",
       });
     });
+
     return items;
   };
 
@@ -69,22 +73,41 @@ interface DashboardState {
     rectificationRate: number;
   };
   riskDepartments: { name: string; score: number; warnings: number }[];
+  refreshStats: () => void;
 }
 
-export const useDashboardStore = create<DashboardState>(() => ({
-  stats: {
-    totalWarnings: PRESCRIPTION_WARNINGS.length,
-    pendingWarnings: getPendingWarnings().length,
-    pendingApprovals: getPendingApprovals().length,
-    criticalCount: PRESCRIPTION_WARNINGS.filter((w) => w.severity === "CRITICAL").length,
-    totalDDDs: 96.4,
-    rectificationRate: 0.872,
-  },
-  riskDepartments: [
-    { name: "ICU", score: 92, warnings: 24 },
-    { name: "呼吸科", score: 85, warnings: 18 },
-    { name: "血液科", score: 78, warnings: 15 },
-    { name: "肿瘤科", score: 71, warnings: 12 },
-    { name: "急诊科", score: 66, warnings: 14 },
-  ],
-}));
+export const useDashboardStore = create<DashboardState>((set) => {
+  const computeStats = () => {
+    const store = useDataStore.getState();
+    const { warnings, tasks } = store;
+
+    const doneCount = tasks.filter((t) => t.status === "DONE").length;
+    const reviewedCount = tasks.filter((t) => t.status === "DONE" || t.status === "REJECTED").length;
+    const rectificationRate = reviewedCount > 0 ? doneCount / reviewedCount : 0.872;
+
+    return {
+      stats: {
+        totalWarnings: warnings.length,
+        pendingWarnings: store.getPendingWarnings().length,
+        pendingApprovals: store.getPendingApprovals().length,
+        criticalCount: warnings.filter((w) => w.severity === "CRITICAL" && w.status === "PENDING").length,
+        totalDDDs: 96.4,
+        rectificationRate,
+      },
+      riskDepartments: [
+        { name: "ICU", score: 92, warnings: 24 },
+        { name: "呼吸科", score: 85, warnings: 18 },
+        { name: "血液科", score: 78, warnings: 15 },
+        { name: "肿瘤科", score: 71, warnings: 12 },
+        { name: "急诊科", score: 66, warnings: 14 },
+      ],
+    };
+  };
+
+  const initial = computeStats();
+
+  return {
+    ...initial,
+    refreshStats: () => set(computeStats()),
+  };
+});

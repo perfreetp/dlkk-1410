@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import type { PrescriptionWarning, WarningType, Severity } from "@/types";
 import { usePresStore, getFilteredWarnings } from "@/store/presStore";
+import { useDataStore } from "@/store/dataStore";
+import { useUserStore, useDashboardStore } from "@/store/appStore";
 import { DEPARTMENTS } from "@/data/users";
 import { cn, formatDateTime, formatTimeAgo, formatSeverity, formatWarningType } from "@/utils/format";
 import { WARNING_TYPE_LABELS, SEVERITY_LABELS } from "@/utils/constants";
@@ -70,6 +72,7 @@ function FiltersPanel({
   onClose?: () => void;
 }) {
   const { filters, setFilters, resetFilters } = usePresStore();
+  const warnings = useDataStore((s) => s.warnings);
 
   const TypeChip = ({ t, label }: { t: WarningType; label: string }) => {
     const active = filters.warningTypes.includes(t);
@@ -86,9 +89,7 @@ function FiltersPanel({
       >
         {label}
         <span className="data-number text-[10px] opacity-70">
-          {usePresStore
-            .getState()
-            .warnings.filter((w) => w.warningType === t).length}
+          {warnings.filter((w) => w.warningType === t).length}
         </span>
       </button>
     );
@@ -221,9 +222,7 @@ function FiltersPanel({
         <div className="space-y-1 max-h-48 overflow-y-auto pr-2 -mr-2">
           {Depts.map((d) => {
             const active = filters.departmentIds.includes(d.id);
-            const count = usePresStore
-              .getState()
-              .warnings.filter((w) => w.departmentId === d.id).length;
+            const count = warnings.filter((w) => w.departmentId === d.id).length;
             return (
               <label
                 key={d.id}
@@ -266,6 +265,13 @@ function DetailDrawer({
 }) {
   const [opinion, setOpinion] = useState("");
   const handle = usePresStore((s) => s.handleWarning);
+
+  const handleAction = (id: string, action: "HANDLED" | "DISMISSED", opinionText: string) => {
+    handle(id, action, opinionText);
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+  };
+
   if (!warning) return null;
 
   const tpl = INTERVENTION_TEMPLATES.find(
@@ -416,7 +422,7 @@ function DetailDrawer({
           <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-border p-4 flex items-center gap-2">
             <button
               onClick={() => {
-                handle(warning.id, "DISMISSED", opinion || "经核查，临床用药合理，予以放行。");
+                handleAction(warning.id, "DISMISSED", opinion || "经核查，临床用药合理，予以放行。");
                 onClose();
               }}
               className="btn-outline flex-1"
@@ -426,7 +432,7 @@ function DetailDrawer({
             </button>
             <button
               onClick={() => {
-                handle(warning.id, "HANDLED", opinion || "已发会诊申请，等待审批。");
+                handleAction(warning.id, "HANDLED", opinion || "已发会诊申请，等待审批。");
                 onClose();
               }}
               className="btn-secondary flex-1"
@@ -436,7 +442,7 @@ function DetailDrawer({
             </button>
             <button
               onClick={() => {
-                handle(warning.id, "HANDLED", opinion || "处方拦截，请修改后重新开具。");
+                handleAction(warning.id, "HANDLED", opinion || "处方拦截，请修改后重新开具。");
                 onClose();
               }}
               className="btn-danger flex-1"
@@ -454,10 +460,11 @@ function DetailDrawer({
 export default function MonitoringPage() {
   const [sortBy, setSortBy] = useState<"time" | "severity">("time");
   const state = usePresStore();
+  const warnings = useDataStore((s) => s.warnings);
   const [detail, setDetail] = useState<PrescriptionWarning | null>(null);
   const [showFilters, setShowFilters] = useState(true);
 
-  const warnings = useMemo(() => {
+  const filteredWarnings = useMemo(() => {
     const arr = getFilteredWarnings(state);
     return arr.sort((a, b) => {
       if (sortBy === "severity") {
@@ -466,16 +473,16 @@ export default function MonitoringPage() {
       }
       return -a.createdAt.localeCompare(b.createdAt);
     });
-  }, [state, sortBy]);
+  }, [state, sortBy, warnings]);
 
   const stats = useMemo(() => {
-    const total = warnings.length;
+    const total = filteredWarnings.length;
     const byType: Record<string, number> = {};
-    warnings.forEach((w) => {
+    filteredWarnings.forEach((w) => {
       byType[w.warningType] = (byType[w.warningType] || 0) + 1;
     });
-    return { total, byType, pending: warnings.filter((w) => w.status === "PENDING").length };
-  }, [warnings]);
+    return { total, byType, pending: filteredWarnings.filter((w) => w.status === "PENDING").length };
+  }, [filteredWarnings]);
 
   return (
     <div className="space-y-4">
@@ -560,7 +567,7 @@ export default function MonitoringPage() {
                 </tr>
               </thead>
               <tbody>
-                {warnings.slice(0, 50).map((w, i) => {
+                {filteredWarnings.slice(0, 50).map((w, i) => {
                   const Icon = WARN_ICONS[w.warningType];
                   const isCrit = w.severity === "CRITICAL";
                   const isHigh = w.severity === "HIGH";
@@ -664,7 +671,7 @@ export default function MonitoringPage() {
             </table>
           </div>
 
-          {warnings.length === 0 && (
+          {filteredWarnings.length === 0 && (
             <div className="py-24 text-center">
               <div className="text-5xl mb-3">✅</div>
               <div className="text-sm text-slate-500">当前筛选条件下暂无预警记录</div>

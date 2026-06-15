@@ -23,7 +23,8 @@ import {
   X,
 } from "lucide-react";
 import type { ApprovalRequest, ApprovalStatus } from "@/types";
-import { APPROVAL_REQUESTS } from "@/data/approvals";
+import { useDataStore } from "@/store/dataStore";
+import { useUserStore, useDashboardStore } from "@/store/appStore";
 import { cn, formatDateTime, formatDrugCategory, formatPriority, getDaysRemaining, formatTimeAgo } from "@/utils/format";
 import { DRUG_CATEGORY_LABELS, APPROVAL_STATUS_LABELS } from "@/utils/constants";
 import { getTitleName } from "@/data/users";
@@ -138,15 +139,28 @@ function DetailPanel({
 }) {
   const [opinion, setOpinion] = useState("");
   const [result, setResult] = useState<"APPROVED" | "REJECTED" | null>(null);
+  const processApproval = useDataStore((s) => s.processApproval);
+  const approvals = useDataStore((s) => s.approvals);
 
-  if (!req) return null;
+  const currentReq = req ? approvals.find((a) => a.id === req.id) || req : null;
+
+  if (!currentReq) return null;
 
   const isMyTurn =
-    req.status === "PENDING" ||
-    (req.status === "IN_PROGRESS" && (req.currentStep === 1 || req.currentStep === 2));
+    currentReq.status === "PENDING" ||
+    (currentReq.status === "IN_PROGRESS" && (currentReq.currentStep === 1 || currentReq.currentStep === 2));
 
-  const days = req.deadline ? getDaysRemaining(req.deadline) : null;
+  const days = currentReq.deadline ? getDaysRemaining(currentReq.deadline) : null;
   const overdue = days !== null && days < 0;
+
+  const handleSubmit = () => {
+    if (!result || !opinion || !currentReq) return;
+    processApproval(currentReq.id, result, opinion);
+    useUserStore.getState().refreshTodos();
+    useDashboardStore.getState().refreshStats();
+    setResult(null);
+    setOpinion("");
+  };
 
   return (
     <>
@@ -155,20 +169,20 @@ function DetailPanel({
         <header
           className={cn(
             "px-6 py-4 border-b border-border shrink-0",
-            req.isUrgent && "bg-gradient-to-r from-red-50 via-amber-50/40 to-transparent"
+            currentReq.isUrgent && "bg-gradient-to-r from-red-50 via-amber-50/40 to-transparent"
           )}
         >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <StatusBadge s={req.status} urgent={req.isUrgent} />
-                {req.drugCategory === "SPECIAL" && (
+                <StatusBadge s={currentReq.status} urgent={currentReq.isUrgent} />
+                {currentReq.drugCategory === "SPECIAL" && (
                   <span className="badge-drug-special">特殊级药物</span>
                 )}
-                {req.drugCategory === "RESTRICTED" && (
+                {currentReq.drugCategory === "RESTRICTED" && (
                   <span className="badge-drug-restricted">限制级药物</span>
                 )}
-                {req.isUrgent && (
+                {currentReq.isUrgent && (
                   <span className="badge-severity-critical inline-flex items-center gap-1">
                     <Zap className="w-3 h-3" />
                     紧急绿色通道
@@ -176,20 +190,20 @@ function DetailPanel({
                 )}
               </div>
               <h2 className="font-display text-2xl text-navy-700 tracking-tight mt-2.5">
-                {req.patientName} · {req.drugName}
+                {currentReq.patientName} · {currentReq.drugName}
               </h2>
               <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
                 <span>
                   <span className="inline-flex items-center gap-1">
                     <ClipboardCheck className="w-3 h-3" />
-                    申请单号 {req.id.toUpperCase()}
+                    申请单号 {currentReq.id.toUpperCase()}
                   </span>
                 </span>
                 <span className="text-slate-300">·</span>
                 <span>
-                  {formatTimeAgo(req.createdAt)}申请 · {formatDateTime(req.createdAt)}
+                  {formatTimeAgo(currentReq.createdAt)}申请 · {formatDateTime(currentReq.createdAt)}
                 </span>
-                {req.deadline && (
+                {currentReq.deadline && (
                   <>
                     <span className="text-slate-300">·</span>
                     <span
@@ -223,16 +237,16 @@ function DetailPanel({
                   <User className="w-3.5 h-3.5" />
                   患者信息
                 </div>
-                <div className="text-xl font-bold text-navy-700">{req.patientName}</div>
+                <div className="text-xl font-bold text-navy-700">{currentReq.patientName}</div>
                 <div className="text-sm text-slate-600 mt-0.5">
-                  {req.patientGender === "M" ? "男" : "女"} · {req.patientAge}岁
+                  {currentReq.patientGender === "M" ? "男" : "女"} · {currentReq.patientAge}岁
                 </div>
                 <div className="mt-4 pt-4 border-t border-slate-200/60">
                   <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">
                     临床诊断
                   </div>
                   <div className="text-sm text-slate-700 leading-relaxed">
-                    {req.patientDiagnosis}
+                    {currentReq.patientDiagnosis}
                   </div>
                 </div>
               </div>
@@ -242,9 +256,9 @@ function DetailPanel({
                   <Building2 className="w-3.5 h-3.5" />
                   申请方
                 </div>
-                <div className="text-sm font-medium text-slate-800">{req.applicantName}</div>
+                <div className="text-sm font-medium text-slate-800">{currentReq.applicantName}</div>
                 <div className="text-xs text-slate-500 mt-0.5">
-                  {getTitleName(req.applicantTitle)} · {req.departmentName}
+                  {getTitleName(currentReq.applicantTitle)} · {currentReq.departmentName}
                 </div>
               </div>
 
@@ -257,32 +271,32 @@ function DetailPanel({
                   <div className="flex justify-between items-baseline">
                     <span className="text-xs text-slate-500">药品</span>
                     <span className="text-sm font-semibold text-slate-800">
-                      {req.drugName}
+                      {currentReq.drugName}
                     </span>
                   </div>
                   <div className="flex justify-between items-baseline">
                     <span className="text-xs text-slate-500">规格</span>
-                    <span className="text-xs text-slate-600">{req.drugSpecification}</span>
+                    <span className="text-xs text-slate-600">{currentReq.drugSpecification}</span>
                   </div>
                   <div className="flex justify-between items-baseline">
                     <span className="text-xs text-slate-500">剂量</span>
-                    <span className="text-sm text-slate-700 font-mono">{req.proposedDosage}</span>
+                    <span className="text-sm text-slate-700 font-mono">{currentReq.proposedDosage}</span>
                   </div>
                   <div className="flex justify-between items-baseline">
                     <span className="text-xs text-slate-500">疗程</span>
-                    <span className="text-sm text-slate-700">{req.proposedDuration} 天</span>
+                    <span className="text-sm text-slate-700">{currentReq.proposedDuration} 天</span>
                   </div>
                 </div>
               </div>
 
-              {req.validHours && (
+              {currentReq.validHours && (
                 <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200/60">
                   <div className="flex items-center gap-2 text-emerald-700 font-semibold text-sm mb-1">
                     <CheckCircle2 className="w-4 h-4" />
                     已授权
                   </div>
                   <div className="text-xs text-emerald-600">
-                    授权时长 {req.validHours} 小时，到期自动收回权限
+                    授权时长 {currentReq.validHours} 小时，到期自动收回权限
                   </div>
                 </div>
               )}
@@ -295,7 +309,7 @@ function DetailPanel({
                   <h3 className="font-display text-lg text-slate-800">申请理由</h3>
                 </div>
                 <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line">
-                  {req.reason}
+                  {currentReq.reason}
                 </p>
               </div>
 
@@ -312,7 +326,7 @@ function DetailPanel({
                     </span>
                   )}
                 </div>
-                <ApprovalTimeline req={req} />
+                <ApprovalTimeline req={currentReq} />
               </div>
 
               {isMyTurn && (
@@ -375,7 +389,7 @@ function DetailPanel({
                         </span>
                         ，并记录审批意见及电子签名
                       </div>
-                      <button className="btn-sm btn-primary">
+                      <button className="btn-sm btn-primary" onClick={handleSubmit}>
                         <Send className="w-3.5 h-3.5" />
                         确认提交
                       </button>
@@ -395,6 +409,7 @@ export default function ApprovalPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("PENDING");
   const [keyword, setKeyword] = useState("");
   const [detail, setDetail] = useState<ApprovalRequest | null>(null);
+  const approvals = useDataStore((s) => s.approvals);
 
   const tabsWithCount = useMemo(
     () =>
@@ -402,14 +417,14 @@ export default function ApprovalPage() {
         ...t,
         count:
           t.key === "ALL"
-            ? APPROVAL_REQUESTS.length
-            : APPROVAL_REQUESTS.filter((a) => a.status === t.key).length,
+            ? approvals.length
+            : approvals.filter((a) => a.status === t.key).length,
       })),
-    []
+    [approvals]
   );
 
   const requests = useMemo(() => {
-    return APPROVAL_REQUESTS.filter((a) => {
+    return approvals.filter((a) => {
       if (tab !== "ALL" && a.status !== tab) return false;
       if (keyword) {
         const k = keyword.toLowerCase();
@@ -425,7 +440,7 @@ export default function ApprovalPage() {
       if (a.isUrgent !== b.isUrgent) return a.isUrgent ? -1 : 1;
       return -a.createdAt.localeCompare(b.createdAt);
     });
-  }, [tab, keyword]);
+  }, [tab, keyword, approvals]);
 
   return (
     <div className="space-y-5">
