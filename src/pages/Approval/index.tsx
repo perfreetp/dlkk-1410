@@ -21,13 +21,16 @@ import {
   RefreshCw,
   Info,
   X,
+  History,
+  Tag,
+  Shield,
 } from "lucide-react";
-import type { ApprovalRequest, ApprovalStatus } from "@/types";
+import type { ApprovalRequest, ApprovalStatus, AuditLog, AuditActionType } from "@/types";
 import { useDataStore } from "@/store/dataStore";
 import { useUserStore, useDashboardStore } from "@/store/appStore";
 import { useNavStore } from "@/store/navStore";
 import { cn, formatDateTime, formatDrugCategory, formatPriority, getDaysRemaining, formatTimeAgo } from "@/utils/format";
-import { DRUG_CATEGORY_LABELS, APPROVAL_STATUS_LABELS } from "@/utils/constants";
+import { DRUG_CATEGORY_LABELS, APPROVAL_STATUS_LABELS, AUDIT_ACTION_LABELS, AUDIT_ACTION_COLORS, AUDIT_RESULT_LABELS } from "@/utils/constants";
 import { getTitleName } from "@/data/users";
 
 const TABS: Array<{ key: "ALL" | ApprovalStatus; label: string; count?: number }> = [
@@ -37,6 +40,26 @@ const TABS: Array<{ key: "ALL" | ApprovalStatus; label: string; count?: number }
   { key: "APPROVED", label: "已通过" },
   { key: "REJECTED", label: "已驳回" },
 ];
+
+const AUDIT_ACTION_ICONS: Record<AuditActionType, React.ComponentType<{ className?: string }>> = {
+  APPROVAL_REVIEWED: ClipboardCheck,
+  WARNING_HANDLED: Pill,
+  PERMISSION_CHANGED: Shield,
+  RECTIFICATION_REVIEWED: CheckCircle2,
+  RECTIFICATION_CREATED: RefreshCw,
+  DRUG_ADDED: FileText,
+  DRUG_UPDATED: RefreshCw,
+  DRUG_DELETED: XCircle,
+  DRUG_BATCH_UPDATED: Zap,
+};
+
+const AUDIT_RESULT_COLORS: Record<string, string> = {
+  APPROVED: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  REJECTED: "bg-red-50 text-red-700 ring-red-200",
+  HANDLED: "bg-teal-50 text-teal-700 ring-teal-200",
+  DISMISSED: "bg-slate-50 text-slate-600 ring-slate-200",
+  DONE: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+};
 
 function StatusBadge({ s, urgent }: { s: ApprovalStatus; urgent?: boolean }) {
   const cls =
@@ -134,9 +157,11 @@ function ApprovalTimeline({ req }: { req: ApprovalRequest }) {
 function DetailPanel({
   req,
   onClose,
+  onOpenAudit,
 }: {
   req: ApprovalRequest | null;
   onClose: () => void;
+  onOpenAudit: () => void;
 }) {
   const [opinion, setOpinion] = useState("");
   const [result, setResult] = useState<"APPROVED" | "REJECTED" | null>(null);
@@ -224,9 +249,18 @@ function DetailPanel({
                 )}
               </div>
             </div>
-            <button className="btn-ghost p-2" onClick={onClose}>
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                className="btn-outline btn-sm inline-flex items-center gap-1"
+                onClick={onOpenAudit}
+              >
+                <History className="w-3.5 h-3.5" />
+                查看操作追溯
+              </button>
+              <button className="btn-ghost p-2" onClick={onClose}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -406,10 +440,160 @@ function DetailPanel({
   );
 }
 
+function AuditTrailDrawer({
+  open,
+  onClose,
+  approvalId,
+  patientName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  approvalId: string;
+  patientName: string;
+}) {
+  const auditLogs = useDataStore((s) => s.auditLogs);
+
+  const logs = useMemo(() => {
+    return auditLogs
+      .filter((log) => {
+        if (log.targetId === approvalId) return true;
+        if (log.extra?.patient === patientName) return true;
+        return false;
+      })
+      .sort((a, b) => -a.createdAt.localeCompare(b.createdAt));
+  }, [auditLogs, approvalId, patientName]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-navy-700/20 backdrop-blur-sm z-[60] animate-fade-in" onClick={onClose} />
+      <div className="fixed top-0 right-0 bottom-0 w-[400px] bg-white z-[70] shadow-2xl overflow-y-auto animate-slide-in-right flex flex-col">
+        <div className="sticky top-0 z-10 px-6 py-5 border-b border-border bg-white/90 backdrop-blur">
+          <div className="flex items-start justify-between gap-4">
+            <div className="pr-4">
+              <div className="flex items-center gap-2 mb-1">
+                <History className="w-4 h-4 text-navy-600" />
+                <span className="text-xs text-slate-500">操作追溯台账</span>
+              </div>
+              <h2 className="font-display text-xl text-navy-700 tracking-tight">
+                审批流程追溯台账
+              </h2>
+              <div className="text-xs text-slate-500 mt-1">
+                患者：<span className="font-medium text-slate-700">{patientName}</span>
+              </div>
+            </div>
+            <button className="btn-ghost p-2" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 p-5">
+          {logs.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                <History className="w-8 h-8 text-slate-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-slate-700 mb-1">暂无操作记录</h3>
+              <p className="text-sm text-slate-400">该审批申请暂无相关操作记录</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="relative pl-6">
+                <div className="absolute left-[11px] top-2 bottom-2 w-px bg-slate-200" />
+                {logs.map((log, i) => {
+                  const ActionIcon = AUDIT_ACTION_ICONS[log.actionType];
+                  return (
+                    <div key={log.id} className="relative pb-5 last:pb-0">
+                      <div
+                        className={cn(
+                          "absolute -left-6 w-6 h-6 rounded-full flex items-center justify-center ring-4 ring-white shadow-sm",
+                          AUDIT_ACTION_COLORS[log.actionType]
+                        )}
+                      >
+                        <ActionIcon className="w-3 h-3" />
+                      </div>
+                      <div className="card p-4 ml-2">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <span
+                            className={cn(
+                              "badge ring-1 ring-inset",
+                              AUDIT_ACTION_COLORS[log.actionType]
+                            )}
+                          >
+                            {AUDIT_ACTION_LABELS[log.actionType]}
+                          </span>
+                          {log.result && (
+                            <span
+                              className={cn(
+                                "badge ring-1 ring-inset",
+                                AUDIT_RESULT_COLORS[log.result] ||
+                                  "bg-slate-50 text-slate-600 ring-slate-200"
+                              )}
+                            >
+                              {AUDIT_RESULT_LABELS[log.result] || log.result}
+                            </span>
+                          )}
+                          {log.extra &&
+                            Object.entries(log.extra).map(([k, v]) =>
+                              v && k !== "patient" ? (
+                                <span
+                                  key={k}
+                                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-slate-50 text-slate-500 ring-1 ring-inset ring-slate-200"
+                                >
+                                  <Tag className="w-2.5 h-2.5" />
+                                  {k === "count"
+                                    ? `共${v}项`
+                                    : k === "changedCount"
+                                    ? `变更${v}项`
+                                    : k === "step"
+                                    ? v
+                                    : k === "validHours"
+                                    ? `有效期${v}h`
+                                    : k === "deadline"
+                                    ? `截止${v.slice(5)}`
+                                    : typeof v === "string" && v.length > 8
+                                    ? `${v.slice(0, 8)}...`
+                                    : v}
+                                </span>
+                              ) : null
+                            )}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed mb-3">
+                          {log.description}
+                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <div className="w-5 h-5 rounded-md bg-gradient-to-br from-navy-200 to-navy-400 flex items-center justify-center text-white text-[9px] font-semibold shrink-0">
+                              {log.operatorName.slice(0, 1)}
+                            </div>
+                            <span className="font-medium text-slate-700">
+                              {log.operatorName}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+                            {formatDateTime(log.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function ApprovalPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("PENDING");
   const [keyword, setKeyword] = useState("");
   const [detail, setDetail] = useState<ApprovalRequest | null>(null);
+  const [auditOpen, setAuditOpen] = useState(false);
   const approvals = useDataStore((s) => s.approvals);
   const consumeTarget = useNavStore((s) => s.consumeTarget);
 
@@ -635,7 +819,13 @@ export default function ApprovalPage() {
         )}
       </div>
 
-      <DetailPanel req={detail} onClose={() => setDetail(null)} />
+      <DetailPanel req={detail} onClose={() => setDetail(null)} onOpenAudit={() => setAuditOpen(true)} />
+      <AuditTrailDrawer
+        open={auditOpen && detail !== null}
+        onClose={() => setAuditOpen(false)}
+        approvalId={detail?.id || ""}
+        patientName={detail?.patientName || ""}
+      />
     </div>
   );
 }

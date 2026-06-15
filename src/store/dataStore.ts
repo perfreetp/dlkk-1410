@@ -22,6 +22,30 @@ import dayjs from "dayjs";
 
 const now = () => dayjs().format("YYYY-MM-DD HH:mm");
 
+const AUDIT_LOGS_STORAGE_KEY = "ams-audit-logs";
+
+const loadAuditLogsFromStorage = (): AuditLog[] => {
+  try {
+    if (typeof window === "undefined") return [];
+    const stored = window.localStorage.getItem(AUDIT_LOGS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed)) return parsed as AuditLog[];
+    return [];
+  } catch {
+    return [];
+  }
+};
+
+const saveAuditLogsToStorage = (logs: AuditLog[]) => {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(AUDIT_LOGS_STORAGE_KEY, JSON.stringify(logs));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 interface DataState {
   drugs: Drug[];
   initialDrugs: Drug[];
@@ -76,6 +100,8 @@ interface DataState {
   };
 }
 
+const storedAuditLogs = loadAuditLogsFromStorage();
+
 export const useDataStore = create<DataState>((set, get) => ({
   drugs: [...INITIAL_DRUGS],
   initialDrugs: [...INITIAL_DRUGS],
@@ -87,7 +113,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   initialPermissions: [...INITIAL_PERMISSIONS],
   warnings: [...INITIAL_WARNINGS],
   initialWarnings: [...INITIAL_WARNINGS],
-  auditLogs: [],
+  auditLogs: storedAuditLogs,
 
   addAuditLog: (entry) => {
     const log: AuditLog = {
@@ -96,7 +122,9 @@ export const useDataStore = create<DataState>((set, get) => ({
       createdAt: now(),
       operatorName: CURRENT_USER.name,
     };
-    set((s) => ({ auditLogs: [log, ...s.auditLogs] }));
+    const newLogs = [log, ...get().auditLogs];
+    set({ auditLogs: newLogs });
+    saveAuditLogsToStorage(newLogs);
   },
 
   addDrug: (drug) => {

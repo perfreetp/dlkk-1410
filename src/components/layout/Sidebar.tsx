@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
+import type { ComponentType } from "react";
 import {
   LayoutDashboard,
   BookText,
@@ -14,22 +15,40 @@ import {
 import { cn } from "@/utils/format";
 import { useDataStore } from "@/store/dataStore";
 
-const BASE_NAV = [
+interface NavItemDef {
+  to: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  end?: boolean;
+  badge?: number;
+}
+
+const BASE_NAV: NavItemDef[] = [
   { to: "/", label: "首页总览", icon: LayoutDashboard, end: true },
   { to: "/catalog", label: "分级目录", icon: BookText },
   { to: "/permissions", label: "权限管理", icon: ShieldCheck },
-  { to: "/monitoring", label: "处方监测", icon: Activity, badge: 23 },
-  { to: "/approval", label: "会诊审批", icon: ClipboardCheck, badge: 8 },
+  { to: "/monitoring", label: "处方监测", icon: Activity },
+  { to: "/approval", label: "会诊审批", icon: ClipboardCheck },
   { to: "/analytics", label: "科室分析", icon: BarChart3 },
-  { to: "/rectification", label: "整改跟踪", icon: FileX2, badge: 6 },
+  { to: "/rectification", label: "整改跟踪", icon: FileX2 },
 ];
 
 export default function Sidebar() {
   const loc = useLocation();
   const auditBadge = useDataStore((s) => s.auditLogs.length || 0);
+  const criticalWarnings = useDataStore((s) => s.warnings.filter((w) => w.severity === "CRITICAL" && w.status === "PENDING").length);
+  const pendingApprovals = useDataStore((s) => s.approvals.filter((a) => a.status === "PENDING" || a.status === "IN_PROGRESS").length);
+  const pendingTasks = useDataStore((s) => s.tasks.filter((t) => t.status === "REVIEWING").length);
 
-  const NAV = [
-    ...BASE_NAV,
+  const BASE_WITH_BADGES: NavItemDef[] = BASE_NAV.map((item) => {
+    if (item.to === "/monitoring") return { ...item, badge: criticalWarnings };
+    if (item.to === "/approval") return { ...item, badge: pendingApprovals };
+    if (item.to === "/rectification") return { ...item, badge: pendingTasks };
+    return item;
+  });
+
+  const NAV: NavItemDef[] = [
+    ...BASE_WITH_BADGES,
     { to: "/audit", label: "操作记录", icon: ClipboardList, badge: auditBadge },
   ];
 

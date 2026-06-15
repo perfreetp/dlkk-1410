@@ -11,11 +11,24 @@ import {
   Activity,
   FileCheck,
   ListChecks,
+  FileText,
+  Shield,
+  CheckCircle2,
+  XCircle,
+  Eye,
+  Search,
+  Pill,
+  UserCheck,
+  ClipboardEdit,
+  ClipboardCheck,
+  RotateCcw,
+  Zap,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDashboardStore, useUserStore } from "@/store/appStore";
 import { useDataStore } from "@/store/dataStore";
-import { useNavStore } from "@/store/navStore";
+import { useNavStore, type NavTargetPage } from "@/store/navStore";
+import type { AuditActionType, AuditLog } from "@/types";
 import {
   formatNumber,
   formatPercent,
@@ -411,6 +424,208 @@ function RiskDepartments() {
   );
 }
 
+interface ActionMeta {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  badgeClass: string;
+  targetPage?: NavTargetPage;
+}
+
+const ACTION_META: Record<AuditActionType, ActionMeta> = {
+  APPROVAL_REVIEWED: {
+    icon: ClipboardCheck,
+    label: "审批记录",
+    badgeClass: "bg-amber-100 text-amber-700 ring-amber-200",
+    targetPage: "/approval",
+  },
+  WARNING_HANDLED: {
+    icon: AlertTriangle,
+    label: "预警处理",
+    badgeClass: "bg-red-100 text-red-700 ring-red-200",
+    targetPage: "/monitoring",
+  },
+  RECTIFICATION_REVIEWED: {
+    icon: CheckCircle2,
+    label: "整改审核",
+    badgeClass: "bg-emerald-100 text-emerald-700 ring-emerald-200",
+    targetPage: "/rectification",
+  },
+  RECTIFICATION_CREATED: {
+    icon: ClipboardEdit,
+    label: "整改下发",
+    badgeClass: "bg-violet-100 text-violet-700 ring-violet-200",
+    targetPage: "/rectification",
+  },
+  PERMISSION_CHANGED: {
+    icon: Shield,
+    label: "权限变更",
+    badgeClass: "bg-blue-100 text-blue-700 ring-blue-200",
+  },
+  DRUG_ADDED: {
+    icon: Pill,
+    label: "药品新增",
+    badgeClass: "bg-teal-100 text-teal-700 ring-teal-200",
+  },
+  DRUG_UPDATED: {
+    icon: FileText,
+    label: "药品更新",
+    badgeClass: "bg-cyan-100 text-cyan-700 ring-cyan-200",
+  },
+  DRUG_DELETED: {
+    icon: XCircle,
+    label: "药品删除",
+    badgeClass: "bg-rose-100 text-rose-700 ring-rose-200",
+  },
+  DRUG_BATCH_UPDATED: {
+    icon: ListChecks,
+    label: "批量调整",
+    badgeClass: "bg-slate-100 text-slate-700 ring-slate-200",
+  },
+};
+
+function RecentActivity() {
+  const logs = useDataStore((s) => s.auditLogs.slice(0, 6));
+  const navigate = useNavigate();
+  const setTarget = useNavStore((s) => s.setTarget);
+  const setAuditFilter = useNavStore((s) => s.setAuditFilter);
+
+  const handleViewBusiness = (log: AuditLog) => {
+    const meta = ACTION_META[log.actionType];
+    if (!meta.targetPage || !log.targetId) return;
+    setTarget(meta.targetPage, log.targetId);
+    navigate(meta.targetPage);
+  };
+
+  const handleViewAudit = (log: AuditLog) => {
+    setAuditFilter({
+      actionType: log.actionType,
+      targetId: log.targetId,
+      operatorName: log.operatorName,
+    });
+    navigate("/audit");
+  };
+
+  const hasBusinessLink = (log: AuditLog): boolean => {
+    const meta = ACTION_META[log.actionType];
+    return !!meta.targetPage && !!log.targetId;
+  };
+
+  return (
+    <div className="card-section h-full">
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <Activity className="w-5 h-5 text-teal-500" />
+          <h3 className="section-title">最近动态</h3>
+        </div>
+        <Link
+          to="/audit"
+          className="text-xs font-medium text-teal-600 hover:text-teal-700 inline-flex items-center gap-1"
+        >
+          全部记录 <ArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
+
+      {logs.length === 0 ? (
+        <div className="py-12 text-center text-slate-400 text-sm">
+          📝 暂无操作记录
+        </div>
+      ) : (
+        <div className="relative">
+          <div className="absolute left-[18px] top-2 bottom-2 w-px bg-gradient-to-b from-teal-200 via-slate-200 to-transparent" />
+          <div className="space-y-3 -mx-2">
+            {logs.map((log, i) => {
+              const meta = ACTION_META[log.actionType];
+              const Icon = meta.icon;
+              const showBiz = hasBusinessLink(log);
+              return (
+                <div
+                  key={log.id}
+                  className="relative pl-11 pr-2 py-3 rounded-xl hover:bg-slate-50 transition-colors group animate-fade-in-up"
+                  style={{ animationDelay: `${i * 0.05}s` }}
+                >
+                  <div
+                    className={cn(
+                      "absolute left-0 top-3.5 w-9 h-9 rounded-xl flex items-center justify-center ring-2 ring-white shadow-sm",
+                      meta.badgeClass
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded-md font-semibold ring-1 ring-inset",
+                          meta.badgeClass
+                        )}
+                      >
+                        {meta.label}
+                      </span>
+                      {log.result && (
+                        <span
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded-md font-semibold ring-1 ring-inset",
+                            log.result === "APPROVED" || log.result === "HANDLED" || log.result === "DONE"
+                              ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                              : "bg-red-50 text-red-700 ring-red-200"
+                          )}
+                        >
+                          {log.result === "APPROVED" ? "通过" :
+                            log.result === "HANDLED" ? "已干预" :
+                            log.result === "DONE" ? "完成" :
+                            log.result === "DISMISSED" ? "忽略" : "驳回"}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1.5 text-sm text-slate-700 leading-relaxed line-clamp-2">
+                      {log.description}
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span className="inline-flex items-center gap-1">
+                          <UserCheck className="w-3 h-3" />
+                          {log.operatorName}
+                        </span>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {formatTimeAgo(log.createdAt)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {showBiz && (
+                          <button
+                            onClick={() => handleViewBusiness(log)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 ring-1 ring-inset ring-teal-200 transition-colors"
+                          >
+                            <Eye className="w-3 h-3" />
+                            查看业务
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleViewAudit(log)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 ring-1 ring-inset ring-slate-200 transition-colors"
+                        >
+                          <Search className="w-3 h-3" />
+                          查看追溯
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuickEntries() {
   const ENTRIES = [
     { to: "/catalog", title: "分级目录", desc: "维护抗菌药物目录", icon: "💊", count: 35, color: "bg-emerald-50 border-emerald-200" },
@@ -458,7 +673,8 @@ export default function DashboardPage() {
     refreshStats();
   }, [dashboardStats, refreshStats]);
 
-  const criticalCount = pendingWarnings.filter((w) => w.severity === "CRITICAL").length;
+  const criticalPendingCount = pendingWarnings.filter((w) => w.severity === "CRITICAL").length;
+  const highPendingCount = pendingWarnings.filter((w) => w.severity === "HIGH").length;
   const urgentApprovals = pendingApprovals.filter((a) => a.isUrgent).length;
   const doneCount = tasks.filter((t) => t.status === "DONE").length;
   const reviewedCount = tasks.filter((t) => t.status === "DONE" || t.status === "REJECTED").length;
@@ -471,11 +687,11 @@ export default function DashboardPage() {
       icon: AlertOctagon,
       iconBg: "bg-red-100/80",
       title: "危重预警待处理",
-      value: pendingWarnings.length,
+      value: criticalPendingCount,
       unit: "条",
       delta: 23.5,
       deltaLabel: "较昨日",
-      badge: criticalCount > 0 ? `${criticalCount}条危重` : "需立即处理",
+      badge: highPendingCount > 0 ? `另有${highPendingCount}条高危` : "待立即响应",
       badgeColor: "bg-red-100 text-red-700 ring-red-200",
     },
     {
@@ -533,10 +749,9 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-5">
+        <RecentActivity />
         <DrugCategoryChart />
-        <div className="col-span-2">
-          <RiskDepartments />
-        </div>
+        <RiskDepartments />
       </div>
     </div>
   );

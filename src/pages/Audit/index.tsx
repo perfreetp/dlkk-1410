@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Activity,
   ClipboardCheck,
@@ -17,6 +17,10 @@ import {
   FileText,
   Zap,
   History,
+  X,
+  Stethoscope,
+  UserRound,
+  ClipboardList,
 } from "lucide-react";
 import type { AuditLog, AuditActionType } from "@/types";
 import {
@@ -26,7 +30,19 @@ import {
 } from "@/utils/constants";
 import { cn, formatDateTime } from "@/utils/format";
 import { useDataStore } from "@/store/dataStore";
+import { useNavStore } from "@/store/navStore";
 import dayjs from "dayjs";
+
+type ObjectFilterType =
+  | null
+  | { type: "patient"; value: string }
+  | { type: "doctor"; value: string }
+  | { type: "task"; value: string; label: string };
+
+interface ChipItem {
+  value: string;
+  label: string;
+}
 
 const ACTION_ICONS: Record<AuditActionType, React.ComponentType<{ className?: string }>> = {
   APPROVAL_REVIEWED: ClipboardCheck,
@@ -68,6 +84,63 @@ function getAuditStats(logs: AuditLog[]) {
       l.actionType === "DRUG_BATCH_UPDATED"
   ).length;
   return { total, approvalCount, interventionCount, permissionCount };
+}
+
+function extractObjectChips(logs: AuditLog[]) {
+  const patientMap = new Map<string, number>();
+  const doctorMap = new Map<string, number>();
+  const taskMap = new Map<string, { label: string; index: number }>();
+
+  logs.forEach((log, index) => {
+    if (log.extra?.patient) {
+      patientMap.set(
+        log.extra.patient,
+        Math.min(patientMap.get(log.extra.patient) ?? index, index)
+      );
+    }
+    if (log.extra?.doctor) {
+      doctorMap.set(
+        log.extra.doctor,
+        Math.min(doctorMap.get(log.extra.doctor) ?? index, index)
+      );
+    }
+    if (log.operatorName) {
+      doctorMap.set(
+        log.operatorName,
+        Math.min(doctorMap.get(log.operatorName) ?? index, index)
+      );
+    }
+    if (
+      (log.actionType === "RECTIFICATION_CREATED" ||
+        log.actionType === "RECTIFICATION_REVIEWED") &&
+      log.targetId
+    ) {
+      const existing = taskMap.get(log.targetId);
+      if (!existing || index < existing.index) {
+        taskMap.set(log.targetId, {
+          label: log.targetName || log.targetId,
+          index,
+        });
+      }
+    }
+  });
+
+  const patients: ChipItem[] = Array.from(patientMap.entries())
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, 5)
+    .map(([value]) => ({ value, label: value }));
+
+  const doctors: ChipItem[] = Array.from(doctorMap.entries())
+    .sort((a, b) => a[1] - b[1])
+    .slice(0, 5)
+    .map(([value]) => ({ value, label: value }));
+
+  const tasks: ChipItem[] = Array.from(taskMap.entries())
+    .sort((a, b) => a[1].index - b[1].index)
+    .slice(0, 3)
+    .map(([value, data]) => ({ value, label: data.label }));
+
+  return { patients, doctors, tasks };
 }
 
 function StatsPanel() {
@@ -165,6 +238,118 @@ function StatsPanel() {
   );
 }
 
+function ObjectFilterChips({
+  patients,
+  doctors,
+  tasks,
+  objectFilter,
+  setObjectFilter,
+}: {
+  patients: ChipItem[];
+  doctors: ChipItem[];
+  tasks: ChipItem[];
+  objectFilter: ObjectFilterType;
+  setObjectFilter: (f: ObjectFilterType) => void;
+}) {
+  if (patients.length === 0 && doctors.length === 0 && tasks.length === 0) {
+    return null;
+  }
+
+  const isActive = (type: "patient" | "doctor" | "task", value: string) =>
+    objectFilter?.type === type && objectFilter.value === value;
+
+  const toggleChip = (type: "patient" | "doctor" | "task", item: ChipItem) => {
+    if (isActive(type, item.value)) {
+      setObjectFilter(null);
+    } else {
+      if (type === "task") {
+        setObjectFilter({ type, value: item.value, label: item.label });
+      } else {
+        setObjectFilter({ type, value: item.value } as ObjectFilterType);
+      }
+    }
+  };
+
+  return (
+    <div className="border-t border-border pt-4 mt-4 space-y-3">
+      {patients.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 shrink-0 w-16">
+            <UserRound className="w-3 h-3 text-blue-500" />
+            按患者
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {patients.map((item) => (
+              <button
+                key={`patient-${item.value}`}
+                onClick={() => toggleChip("patient", item)}
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full transition-all",
+                  isActive("patient", item.value)
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-100 hover:bg-blue-100"
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {doctors.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 shrink-0 w-16">
+            <Stethoscope className="w-3 h-3 text-teal-500" />
+            按医生
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {doctors.map((item) => (
+              <button
+                key={`doctor-${item.value}`}
+                onClick={() => toggleChip("doctor", item)}
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full transition-all",
+                  isActive("doctor", item.value)
+                    ? "bg-teal-600 text-white shadow-sm"
+                    : "bg-teal-50 text-teal-700 ring-1 ring-inset ring-teal-100 hover:bg-teal-100"
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tasks.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 shrink-0 w-16">
+            <ClipboardList className="w-3 h-3 text-orange-500" />
+            整改任务
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {tasks.map((item) => (
+              <button
+                key={`task-${item.value}`}
+                onClick={() => toggleChip("task", item)}
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full transition-all max-w-[240px]",
+                  isActive("task", item.value)
+                    ? "bg-orange-600 text-white shadow-sm"
+                    : "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-100 hover:bg-orange-100"
+                )}
+              >
+                <span className="truncate">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FilterPanel({
   selectedTypes,
   setSelectedTypes,
@@ -175,6 +360,11 @@ function FilterPanel({
   dateTo,
   setDateTo,
   onReset,
+  objectFilter,
+  setObjectFilter,
+  patientChips,
+  doctorChips,
+  taskChips,
 }: {
   selectedTypes: AuditActionType[];
   setSelectedTypes: (t: AuditActionType[]) => void;
@@ -185,6 +375,11 @@ function FilterPanel({
   dateTo: string;
   setDateTo: (d: string) => void;
   onReset: () => void;
+  objectFilter: ObjectFilterType;
+  setObjectFilter: (f: ObjectFilterType) => void;
+  patientChips: ChipItem[];
+  doctorChips: ChipItem[];
+  taskChips: ChipItem[];
 }) {
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const allTypes = Object.keys(AUDIT_ACTION_LABELS) as AuditActionType[];
@@ -299,6 +494,14 @@ function FilterPanel({
               </>
             )}
           </div>
+
+          <ObjectFilterChips
+            patients={patientChips}
+            doctors={doctorChips}
+            tasks={taskChips}
+            objectFilter={objectFilter}
+            setObjectFilter={setObjectFilter}
+          />
 
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -463,12 +666,131 @@ function EmptyState() {
   );
 }
 
+function TimelineBanner({
+  objectFilter,
+  onClear,
+}: {
+  objectFilter: NonNullable<ObjectFilterType>;
+  onClear: () => void;
+}) {
+  const config = {
+    patient: {
+      label: "患者",
+      icon: UserRound,
+      color: "from-blue-500 to-blue-600",
+      bg: "bg-blue-50",
+      text: "text-blue-700",
+      ring: "ring-blue-200",
+    },
+    doctor: {
+      label: "医生",
+      icon: Stethoscope,
+      color: "from-teal-500 to-teal-600",
+      bg: "bg-teal-50",
+      text: "text-teal-700",
+      ring: "ring-teal-200",
+    },
+    task: {
+      label: "整改任务",
+      icon: ClipboardList,
+      color: "from-orange-500 to-orange-600",
+      bg: "bg-orange-50",
+      text: "text-orange-700",
+      ring: "ring-orange-200",
+    },
+  }[objectFilter.type];
+
+  const Icon = config.icon;
+  const displayValue =
+    objectFilter.type === "task" ? objectFilter.label : objectFilter.value;
+
+  return (
+    <div className={cn("card p-3 mb-4 ring-1", config.bg, config.ring)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className={cn(
+              "w-8 h-8 rounded-lg bg-gradient-to-br flex items-center justify-center shrink-0",
+              config.color
+            )}
+          >
+            <Icon className="w-4 h-4 text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-slate-700">
+                正在查看
+              </span>
+              <span
+                className={cn(
+                  "inline-flex items-center px-2 py-0.5 rounded-md text-sm font-medium ring-1 ring-inset truncate max-w-[280px]",
+                  config.bg,
+                  config.text,
+                  config.ring
+                )}
+              >
+                {config.label}：{displayValue}
+              </span>
+              <span className="text-sm font-semibold text-slate-700">
+                的完整时间线
+              </span>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onClear}
+          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-white/60 hover:bg-white text-slate-600 hover:text-slate-800 ring-1 ring-slate-200 transition-colors shrink-0"
+        >
+          <X className="w-3 h-3" />
+          取消筛选
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AuditPage() {
   const logs = useDataStore((s) => s.auditLogs);
   const [selectedTypes, setSelectedTypes] = useState<AuditActionType[]>([]);
   const [keyword, setKeyword] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [objectFilter, setObjectFilter] = useState<ObjectFilterType>(null);
+
+  useEffect(() => {
+    const filter = useNavStore.getState().consumeAuditFilter();
+    if (!filter) return;
+    if (filter.actionType && !selectedTypes.includes(filter.actionType)) {
+      setSelectedTypes([filter.actionType]);
+    }
+    if (filter.operatorName) {
+      setKeyword(filter.operatorName);
+    }
+    if (filter.targetId) {
+      // 尝试通过 targetId 找到对应日志并匹配对象
+      const hit = logs.find((l) => l.targetId === filter.targetId);
+      if (hit) {
+        if (hit.actionType === "APPROVAL_REVIEWED" && hit.extra?.patient) {
+          setObjectFilter({ type: "patient", value: hit.extra.patient });
+        } else if (hit.actionType === "WARNING_HANDLED" && hit.extra?.patient) {
+          setObjectFilter({ type: "patient", value: hit.extra.patient });
+        } else if (
+          (hit.actionType === "RECTIFICATION_CREATED" ||
+            hit.actionType === "RECTIFICATION_REVIEWED") &&
+          hit.targetId
+        ) {
+          setObjectFilter({
+            type: "task",
+            value: hit.targetId,
+            label: hit.targetName,
+          } as any);
+        }
+      }
+    }
+  }, []);
+
+  const { patients: patientChips, doctors: doctorChips, tasks: taskChips } =
+    useMemo(() => extractObjectChips(logs), [logs]);
 
   const filtered = useMemo(() => {
     return logs
@@ -487,16 +809,33 @@ export default function AuditPage() {
           dayjs(log.createdAt).isAfter(dayjs(dateTo).endOf("day"), "day")
         )
           return false;
+        if (objectFilter) {
+          if (objectFilter.type === "patient") {
+            if (log.extra?.patient !== objectFilter.value) return false;
+          } else if (objectFilter.type === "doctor") {
+            const matchDoctor =
+              log.extra?.doctor === objectFilter.value ||
+              log.operatorName === objectFilter.value;
+            if (!matchDoctor) return false;
+          } else if (objectFilter.type === "task") {
+            const isRectType =
+              log.actionType === "RECTIFICATION_CREATED" ||
+              log.actionType === "RECTIFICATION_REVIEWED";
+            if (!isRectType || log.targetId !== objectFilter.value)
+              return false;
+          }
+        }
         return true;
       })
       .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf());
-  }, [logs, selectedTypes, keyword, dateFrom, dateTo]);
+  }, [logs, selectedTypes, keyword, dateFrom, dateTo, objectFilter]);
 
   const handleReset = () => {
     setSelectedTypes([]);
     setKeyword("");
     setDateFrom("");
     setDateTo("");
+    setObjectFilter(null);
   };
 
   return (
@@ -513,7 +852,19 @@ export default function AuditPage() {
         dateTo={dateTo}
         setDateTo={setDateTo}
         onReset={handleReset}
+        objectFilter={objectFilter}
+        setObjectFilter={setObjectFilter}
+        patientChips={patientChips}
+        doctorChips={doctorChips}
+        taskChips={taskChips}
       />
+
+      {objectFilter && (
+        <TimelineBanner
+          objectFilter={objectFilter}
+          onClear={() => setObjectFilter(null)}
+        />
+      )}
 
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm text-slate-500 flex items-center gap-2">
