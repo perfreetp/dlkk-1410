@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   ListChecks,
   Plus,
@@ -37,6 +37,7 @@ import { WARNING_TYPE_LABELS, RECTIFICATION_STATUS_LABELS } from "@/utils/consta
 import { getTitleName } from "@/data/users";
 import { useDataStore } from "@/store/dataStore";
 import { useUserStore, useDashboardStore } from "@/store/appStore";
+import { useNavStore } from "@/store/navStore";
 import dayjs from "dayjs";
 
 const STATUSES: Array<{ key: RectificationStatus; label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -677,6 +678,18 @@ export default function RectificationPage() {
   const [keyword, setKeyword] = useState("");
   const [openTask, setOpenTask] = useState<RectificationTask | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const consumeTarget = useNavStore((s) => s.consumeTarget);
+  const tasks = useDataStore((s) => s.tasks);
+
+  useEffect(() => {
+    const id = consumeTarget("/rectification");
+    if (id) {
+      const task = tasks.find((t) => t.id === id);
+      if (task) {
+        setOpenTask(task);
+      }
+    }
+  }, []);
 
   const [newDept, setNewDept] = useState(DEPARTMENTS[0].id);
   const [newAssignee, setNewAssignee] = useState("");
@@ -687,7 +700,6 @@ export default function RectificationPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
 
-  const tasks = useDataStore((s) => s.tasks);
   const addTask = useDataStore((s) => s.addTask);
 
   const availableDoctors = useMemo(() => {

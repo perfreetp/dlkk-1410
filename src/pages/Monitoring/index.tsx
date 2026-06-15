@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -24,6 +24,7 @@ import type { PrescriptionWarning, WarningType, Severity } from "@/types";
 import { usePresStore, getFilteredWarnings } from "@/store/presStore";
 import { useDataStore } from "@/store/dataStore";
 import { useUserStore, useDashboardStore } from "@/store/appStore";
+import { useNavStore } from "@/store/navStore";
 import { DEPARTMENTS } from "@/data/users";
 import { cn, formatDateTime, formatTimeAgo, formatSeverity, formatWarningType } from "@/utils/format";
 import { WARNING_TYPE_LABELS, SEVERITY_LABELS } from "@/utils/constants";
@@ -463,6 +464,17 @@ export default function MonitoringPage() {
   const warnings = useDataStore((s) => s.warnings);
   const [detail, setDetail] = useState<PrescriptionWarning | null>(null);
   const [showFilters, setShowFilters] = useState(true);
+  const consumeTarget = useNavStore((s) => s.consumeTarget);
+
+  useEffect(() => {
+    const id = consumeTarget("/monitoring");
+    if (id) {
+      const warning = warnings.find((w) => w.id === id);
+      if (warning) {
+        setDetail(warning);
+      }
+    }
+  }, []);
 
   const filteredWarnings = useMemo(() => {
     const arr = getFilteredWarnings(state);

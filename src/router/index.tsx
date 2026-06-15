@@ -7,6 +7,7 @@ import MonitoringPage from "@/pages/Monitoring";
 import ApprovalPage from "@/pages/Approval";
 import AnalyticsPage from "@/pages/Analytics";
 import RectificationPage from "@/pages/Rectification";
+import AuditPage from "@/pages/Audit";
 
 export default function AppRouter() {
   return (
@@ -20,6 +21,7 @@ export default function AppRouter() {
           <Route path="/approval" element={<ApprovalPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/rectification" element={<RectificationPage />} />
+          <Route path="/audit" element={<AuditPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

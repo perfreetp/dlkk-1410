@@ -510,7 +510,18 @@ export default function CatalogPage() {
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
-  const drugCounts = useMemo(() => getDrugCounts(), [getDrugCounts]);
+  const drugCounts = useMemo(() => {
+    const counts: Record<DrugCategory | "ALL", number> = {
+      ALL: drugs.length,
+      NON_RESTRICTED: 0,
+      RESTRICTED: 0,
+      SPECIAL: 0,
+    };
+    drugs.forEach((d) => {
+      counts[d.category]++;
+    });
+    return counts;
+  }, [drugs]);
 
   const CATEGORIES = useMemo(
     () => [

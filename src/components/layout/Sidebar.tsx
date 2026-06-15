@@ -9,10 +9,12 @@ import {
   FileX2,
   Pill,
   ChevronRight,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/utils/format";
+import { useDataStore } from "@/store/dataStore";
 
-const NAV = [
+const BASE_NAV = [
   { to: "/", label: "首页总览", icon: LayoutDashboard, end: true },
   { to: "/catalog", label: "分级目录", icon: BookText },
   { to: "/permissions", label: "权限管理", icon: ShieldCheck },
@@ -24,6 +26,13 @@ const NAV = [
 
 export default function Sidebar() {
   const loc = useLocation();
+  const auditBadge = useDataStore((s) => s.auditLogs.length || 0);
+
+  const NAV = [
+    ...BASE_NAV,
+    { to: "/audit", label: "操作记录", icon: ClipboardList, badge: auditBadge },
+  ];
+
   return (
     <aside className="sidebar">
       <div className="h-16 flex items-center gap-3 px-6 border-b border-white/10 shrink-0">
@@ -62,7 +71,7 @@ export default function Sidebar() {
                 )}
               />
               <span className="flex-1 font-medium">{item.label}</span>
-              {item.badge && (
+              {item.badge && item.badge > 0 && (
                 <span
                   className={cn(
                     "inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold",

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   ClipboardCheck,
   Search,
@@ -25,6 +25,7 @@ import {
 import type { ApprovalRequest, ApprovalStatus } from "@/types";
 import { useDataStore } from "@/store/dataStore";
 import { useUserStore, useDashboardStore } from "@/store/appStore";
+import { useNavStore } from "@/store/navStore";
 import { cn, formatDateTime, formatDrugCategory, formatPriority, getDaysRemaining, formatTimeAgo } from "@/utils/format";
 import { DRUG_CATEGORY_LABELS, APPROVAL_STATUS_LABELS } from "@/utils/constants";
 import { getTitleName } from "@/data/users";
@@ -410,6 +411,17 @@ export default function ApprovalPage() {
   const [keyword, setKeyword] = useState("");
   const [detail, setDetail] = useState<ApprovalRequest | null>(null);
   const approvals = useDataStore((s) => s.approvals);
+  const consumeTarget = useNavStore((s) => s.consumeTarget);
+
+  useEffect(() => {
+    const id = consumeTarget("/approval");
+    if (id) {
+      const req = approvals.find((a) => a.id === id);
+      if (req) {
+        setDetail(req);
+      }
+    }
+  }, []);
 
   const tabsWithCount = useMemo(
     () =>

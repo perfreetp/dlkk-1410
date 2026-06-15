@@ -203,4 +203,28 @@ export interface TodoItem {
   createdAt: string;
   deadline?: string;
   link: string;
+  targetId?: string;
+}
+
+export type AuditActionType =
+  | "APPROVAL_REVIEWED"
+  | "WARNING_HANDLED"
+  | "PERMISSION_CHANGED"
+  | "RECTIFICATION_REVIEWED"
+  | "RECTIFICATION_CREATED"
+  | "DRUG_ADDED"
+  | "DRUG_UPDATED"
+  | "DRUG_DELETED"
+  | "DRUG_BATCH_UPDATED";
+
+export interface AuditLog {
+  id: string;
+  actionType: AuditActionType;
+  operatorName: string;
+  targetName: string;
+  targetId?: string;
+  description: string;
+  result?: "APPROVED" | "REJECTED" | "HANDLED" | "DISMISSED" | "DONE";
+  createdAt: string;
+  extra?: Record<string, string>;
 }

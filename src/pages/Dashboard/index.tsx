@@ -12,8 +12,10 @@ import {
   FileCheck,
   ListChecks,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDashboardStore, useUserStore } from "@/store/appStore";
+import { useDataStore } from "@/store/dataStore";
+import { useNavStore } from "@/store/navStore";
 import {
   formatNumber,
   formatPercent,
@@ -36,7 +38,7 @@ import {
   BarChart,
   Cell,
 } from "recharts";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface KpiCardProps {
   gradient: string;
@@ -150,66 +152,24 @@ function MiniSparkline({ delta }: { delta: number }) {
   );
 }
 
-const KPI_DATA: KpiCardProps[] = [
-  {
-    gradient: "bg-gradient-card-red",
-    icon: AlertOctagon,
-    iconBg: "bg-red-100/80",
-    title: "危重预警待处理",
-    value: 12,
-    unit: "条",
-    delta: 23.5,
-    deltaLabel: "较昨日",
-    badge: "需立即处理",
-    badgeColor: "bg-red-100 text-red-700 ring-red-200",
-  },
-  {
-    gradient: "bg-gradient-card-orange",
-    icon: ShieldAlert,
-    iconBg: "bg-amber-100/80",
-    title: "特殊用药待审批",
-    value: 8,
-    unit: "份",
-    delta: -12.8,
-    deltaLabel: "较昨日",
-    badge: "3份紧急",
-    badgeColor: "bg-amber-100 text-amber-800 ring-amber-200",
-  },
-  {
-    gradient: "bg-gradient-card-teal",
-    icon: Activity,
-    iconBg: "bg-teal-100/80",
-    title: "全院使用强度 DDDs",
-    value: formatNumber(96.4, 1),
-    unit: "/100人天",
-    delta: -5.2,
-    deltaLabel: "环比",
-    badge: "优于目标",
-    badgeColor: "bg-emerald-100 text-emerald-700 ring-emerald-200",
-  },
-  {
-    gradient: "bg-gradient-card-blue",
-    icon: FileCheck,
-    iconBg: "bg-blue-100/80",
-    title: "整改完成率",
-    value: formatPercent(0.872, 1),
-    delta: 3.4,
-    deltaLabel: "环比提升",
-    badge: "待审核6项",
-    badgeColor: "bg-blue-100 text-blue-700 ring-blue-200",
-  },
-];
-
 function TodoSection() {
   const [tab, setTab] = useState<"APPROVAL" | "WARNING" | "RECTIFICATION">("APPROVAL");
   const { todos } = useUserStore();
   const filtered = todos.filter((t) => t.type === tab);
+  const navigate = useNavigate();
+  const setTarget = useNavStore((s) => s.setTarget);
 
   const TABS = [
     { key: "APPROVAL" as const, label: "待审批", icon: ClipboardList, count: todos.filter((t) => t.type === "APPROVAL").length },
     { key: "WARNING" as const, label: "待处理预警", icon: AlertTriangle, count: todos.filter((t) => t.type === "WARNING").length },
     { key: "RECTIFICATION" as const, label: "待反馈整改", icon: ListChecks, count: todos.filter((t) => t.type === "RECTIFICATION").length },
   ];
+
+  const handleTodoClick = (todo: typeof todos[0]) => {
+    const page = todo.type === "APPROVAL" ? "/approval" : todo.type === "WARNING" ? "/monitoring" : "/rectification";
+    setTarget(page, todo.targetId!);
+    navigate(todo.link);
+  };
 
   return (
     <div className="card-section h-full">
@@ -251,10 +211,10 @@ function TodoSection() {
           const days = t.deadline ? getDaysRemaining(t.deadline) : null;
           const isOverdue = days !== null && days < 0;
           return (
-            <Link
+            <div
               key={t.id}
-              to={t.link}
-              className="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group animate-fade-in-up"
+              onClick={() => handleTodoClick(t)}
+              className="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group animate-fade-in-up cursor-pointer"
               style={{ animationDelay: `${i * 0.04}s` }}
             >
               <div
@@ -293,7 +253,7 @@ function TodoSection() {
                 </div>
               </div>
               <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-teal-500 group-hover:translate-x-0.5 transition-all mt-1.5 shrink-0" />
-            </Link>
+            </div>
           );
         })}
       </div>
@@ -487,7 +447,73 @@ function QuickEntries() {
 }
 
 export default function DashboardPage() {
-  const stats = useDashboardStore((s) => s.stats);
+  const refreshStats = useDashboardStore((s) => s.refreshStats);
+
+  const dashboardStats = useDataStore((s) => s.getDashboardStats());
+  const pendingWarnings = useDataStore((s) => s.warnings.filter((w) => w.status === "PENDING"));
+  const pendingApprovals = useDataStore((s) => s.approvals.filter((a) => a.status === "PENDING" || a.status === "IN_PROGRESS"));
+  const tasks = useDataStore((s) => s.tasks);
+
+  useEffect(() => {
+    refreshStats();
+  }, [dashboardStats, refreshStats]);
+
+  const criticalCount = pendingWarnings.filter((w) => w.severity === "CRITICAL").length;
+  const urgentApprovals = pendingApprovals.filter((a) => a.isUrgent).length;
+  const doneCount = tasks.filter((t) => t.status === "DONE").length;
+  const reviewedCount = tasks.filter((t) => t.status === "DONE" || t.status === "REJECTED").length;
+  const reviewingCount = tasks.filter((t) => t.status === "REVIEWING").length;
+  const rectificationRate = reviewedCount > 0 ? doneCount / reviewedCount : 0.872;
+
+  const KPI_DATA: KpiCardProps[] = [
+    {
+      gradient: "bg-gradient-card-red",
+      icon: AlertOctagon,
+      iconBg: "bg-red-100/80",
+      title: "危重预警待处理",
+      value: pendingWarnings.length,
+      unit: "条",
+      delta: 23.5,
+      deltaLabel: "较昨日",
+      badge: criticalCount > 0 ? `${criticalCount}条危重` : "需立即处理",
+      badgeColor: "bg-red-100 text-red-700 ring-red-200",
+    },
+    {
+      gradient: "bg-gradient-card-orange",
+      icon: ShieldAlert,
+      iconBg: "bg-amber-100/80",
+      title: "特殊用药待审批",
+      value: pendingApprovals.length,
+      unit: "份",
+      delta: -12.8,
+      deltaLabel: "较昨日",
+      badge: urgentApprovals > 0 ? `${urgentApprovals}份紧急` : "待处理",
+      badgeColor: "bg-amber-100 text-amber-800 ring-amber-200",
+    },
+    {
+      gradient: "bg-gradient-card-teal",
+      icon: Activity,
+      iconBg: "bg-teal-100/80",
+      title: "全院使用强度 DDDs",
+      value: formatNumber(dashboardStats.totalDDDs, 1),
+      unit: "/100人天",
+      delta: -5.2,
+      deltaLabel: "环比",
+      badge: "优于目标",
+      badgeColor: "bg-emerald-100 text-emerald-700 ring-emerald-200",
+    },
+    {
+      gradient: "bg-gradient-card-blue",
+      icon: FileCheck,
+      iconBg: "bg-blue-100/80",
+      title: "整改完成率",
+      value: formatPercent(rectificationRate, 1),
+      delta: 3.4,
+      deltaLabel: "环比提升",
+      badge: reviewingCount > 0 ? `待审核${reviewingCount}项` : "全部完成",
+      badgeColor: "bg-blue-100 text-blue-700 ring-blue-200",
+    },
+  ];
 
   return (
     <div className="space-y-6">

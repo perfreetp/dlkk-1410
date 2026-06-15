@@ -2,7 +2,6 @@ import { create } from "zustand";
 import type { TodoItem, User } from "@/types";
 import { CURRENT_USER } from "@/data/users";
 import { useDataStore } from "./dataStore";
-import { RECTIFICATION_TASKS } from "@/data/analytics";
 
 interface UserState {
   currentUser: User;
@@ -25,6 +24,7 @@ export const useUserStore = create<UserState>((set) => {
         createdAt: a.createdAt,
         deadline: a.deadline,
         link: "/approval",
+        targetId: a.id,
       });
     });
 
@@ -37,6 +37,7 @@ export const useUserStore = create<UserState>((set) => {
         priority: w.severity === "CRITICAL" ? "URGENT" : w.severity === "HIGH" ? "HIGH" : w.severity === "MEDIUM" ? "MEDIUM" : "LOW",
         createdAt: w.createdAt,
         link: "/monitoring",
+        targetId: w.id,
       });
     });
 
@@ -50,6 +51,7 @@ export const useUserStore = create<UserState>((set) => {
         createdAt: t.feedbackAt || t.createdAt,
         deadline: t.deadline,
         link: "/rectification",
+        targetId: t.id,
       });
     });
 
@@ -78,22 +80,9 @@ interface DashboardState {
 
 export const useDashboardStore = create<DashboardState>((set) => {
   const computeStats = () => {
-    const store = useDataStore.getState();
-    const { warnings, tasks } = store;
-
-    const doneCount = tasks.filter((t) => t.status === "DONE").length;
-    const reviewedCount = tasks.filter((t) => t.status === "DONE" || t.status === "REJECTED").length;
-    const rectificationRate = reviewedCount > 0 ? doneCount / reviewedCount : 0.872;
-
+    const stats = useDataStore.getState().getDashboardStats();
     return {
-      stats: {
-        totalWarnings: warnings.length,
-        pendingWarnings: store.getPendingWarnings().length,
-        pendingApprovals: store.getPendingApprovals().length,
-        criticalCount: warnings.filter((w) => w.severity === "CRITICAL" && w.status === "PENDING").length,
-        totalDDDs: 96.4,
-        rectificationRate,
-      },
+      stats,
       riskDepartments: [
         { name: "ICU", score: 92, warnings: 24 },
         { name: "呼吸科", score: 85, warnings: 18 },
